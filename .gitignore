@@ -1,0 +1,42 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+db.sqlite3
+.env
+staticfiles/
+media/
+ static/
+*.log
+ DS_Store
+ Thumbs.db
+Número
+
+# Django stuff
+*.log
+*.pot
+*-sqlite3
+*.sqlite3
+LocalSettings.py
+.static
+staticfiles/
+ media/
+ 
+
+# Python
+*.pyc
+__pycache__/
+instance/
+.pypyi
+.db
+venv/
+ env/
+ ENV/
+.env
+.venv
+venv.bak/
+
+# VS Code
+.vscode/
