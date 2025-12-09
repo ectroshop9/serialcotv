@@ -145,3 +145,21 @@ class JWTAuditLog(models.Model):
     
     def __str__(self):
         return f"{self.customer.serial} - {self.action}"
+    class BotRegistration(models.Model):
+    """تسجيلات البوتات (مبسط)"""
+    source = models.ForeignKey(Source, on_delete=models.CASCADE)
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    telegram_username = models.CharField(max_length=50, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.source.name} - {self.customer.name}"
+
+class JWTAuditLog(models.Model):
+    """سجلات JWT (مبسط)"""
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    action = models.CharField(max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.customer.serial} - {self.action}"
