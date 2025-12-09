@@ -12,7 +12,12 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me-now-please'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    '.onrender.com',
+    'localhost',
+    '127.0.0.1',
+    '.serialco.tv',
+]
 
 # Application definition
 INSTALLED_APPS = [
@@ -25,9 +30,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     'rest_framework',
-    'rest_framework_simplejwt',
     'corsheaders',
-    'accounts'
+    'accounts',  # ⭐ تطبيقك فقط
 ]
 
 MIDDLEWARE = [
@@ -44,8 +48,6 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'serialcotv.urls'
 
-# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-# الجزء ده هو اللي كان ناقص وسبب الخطأ
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -61,13 +63,10 @@ TEMPLATES = [
         },
     },
 ]
-# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
 
 WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
-# استبدل كل جزء الـ DATABASES بالكود ده بس:
-
-# Database – شغال محلي وعلى Render بدون أي تعديل
+# Database
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql' if config('PGHOST', default=None) else 'django.db.backends.sqlite3',
@@ -87,8 +86,8 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+LANGUAGE_CODE = 'ar'  # ⭐ عدلت من en-us إلى ar
+TIME_ZONE = 'Asia/Riyadh'  # ⭐ عدلت من UTC
 USE_I18N = True
 USE_TZ = True
 
@@ -99,20 +98,35 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# DRF & JWT
+# ⭐⭐ JWT إعدادات نظامك المخصص (ليس simplejwt) ⭐⭐
+JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-jwt-secret-key-change-this')
+JWT_ALGORITHM = 'HS256'
+WALLET_CHARGE_SECRET = config('WALLET_CHARGE_SECRET', default='your-wallet-secret-key')
+
+# DRF إعدادات لنظامك
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'accounts.authentication.CustomerJWTAuthentication',  # ⭐ نظامك المخصص
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ],
 }
 
-SIMPLE_JWT = {
-   'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-}
+# ⭐⭐ CORS للمتجر الحالي ⭐⭐
+CORS_ALLOW_ALL_ORIGINS = False  # ⭐ غير من True إلى False
+CORS_ALLOWED_ORIGINS = [
+    "https://serialco.tv",  # ⭐ المتجر الحالي على cPanel
+    "https://www.serialco.tv",
+    "http://localhost:3000",
+    "https://*.onrender.com",
+]
 
-CORS_ALLOW_ALL_ORIGINS = True
-AUTH_USER_MODEL = 'accounts.User'
+# ⭐⭐ إعدادات أمنية للإنتاج ⭐⭐
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
