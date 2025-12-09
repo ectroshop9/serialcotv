@@ -68,10 +68,15 @@ WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
 # استبدل كل جزء الـ DATABASES بالكود ده بس:
 
+# Database – شغال محلي وعلى Render بدون أي تعديل
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql' if config('PGHOST', default=None) else 'django.db.backends.sqlite3',
+        'NAME': config('PGDATABASE', default=BASE_DIR / 'db.sqlite3'),
+        'USER': config('PGUSER', default=''),
+        'PASSWORD': config('PGPASSWORD', default=''),
+        'HOST': config('PGHOST', default=''),
+        'PORT': config('PGPORT', default='5432'),
     }
 }
 
