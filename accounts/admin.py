@@ -18,5 +18,5 @@ class TransactionAdmin(admin.ModelAdmin):
     list_display = ('customer', 'transaction_type', 'amount')
 
 # ⭐ التسجيل البسيط للباقي
-admin.site.register(BotRegistration)
+#admin.site.register(BotRegistration)
 admin.site.register(JWTAuditLog)
