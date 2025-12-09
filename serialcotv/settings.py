@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'accounts',
+    'accounts.User'
 ]
 
 MIDDLEWARE = [
@@ -115,4 +116,3 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
-AUTH_USER_MODEL = 'accounts.User'  # 'accounts' اسم التطبيق، 'User' اسم الموديل
