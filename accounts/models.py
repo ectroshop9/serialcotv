@@ -1,5 +1,4 @@
-# أنشئ models.py جديد بالكود الكامل
-cat > models.py << 'EOF'
+
 from django.db import models
 import random
 import string
@@ -77,4 +76,4 @@ class Transaction(models.Model):
     
     def __str__(self):
         return f"{self.customer.name} - {self.amount}"
-EOF
+
