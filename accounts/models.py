@@ -4,23 +4,24 @@ import string
 from django.utils import timezone
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.core.validators import MinValueValidator, MaxValueValidator
-from django.contrib.auth.models import User  # ⭐ Django User العادي
+from django.contrib.auth.models import User
 import jwt
 from datetime import datetime, timedelta
 from django.conf import settings
 
 class Source(models.Model):
     SOURCE_PREFIXES = {
-        'T': 'تليجرام', 'S': 'المتجر', 'M': 'مسنجر',
-        'W': 'واتساب', 'A': 'إداري', 'U': 'غير معروف'
+        'T': 'تليجرام',
+        'S': 'المتجر',
+        'M': 'مسنجر',
+        'W': 'واتساب',
+        'A': 'إداري',
+        'U': 'غير معروف'
     }
     
     name = models.CharField(max_length=50)
     prefix = models.CharField(max_length=1, unique=True)
-    description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
-    bot_username = models.CharField(max_length=50, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -28,7 +29,7 @@ class Source(models.Model):
         verbose_name_plural = "مصادر التسجيل"
     
     def __str__(self):
-        return f"{self.get_prefix_display()} - {self.name}"
+        return f"{self.name} ({self.prefix})"
 
 class Customer(models.Model):
     name = models.CharField(max_length=100)
@@ -36,7 +37,6 @@ class Customer(models.Model):
     serial = models.CharField(max_length=18, unique=True)
     pin = models.CharField(max_length=4)
     
-    # ⭐ ربط مع Django User العادي
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -46,18 +46,8 @@ class Customer(models.Model):
     )
     
     source = models.ForeignKey(Source, on_delete=models.SET_NULL, null=True, blank=True)
-    referrer = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True)
-    referred_by_code = models.CharField(max_length=20, blank=True)
-    
     is_active = models.BooleanField(default=True)
-    is_trial_active = models.BooleanField(default=True)
-    trial_expires = models.DateTimeField(null=True, blank=True)
-    
-    total_referrals = models.IntegerField(default=0)
-    referral_earnings = models.IntegerField(default=0)
-    
     created_at = models.DateTimeField(auto_now_add=True)
-    last_login = models.DateTimeField(null=True, blank=True)
     
     class Meta:
         verbose_name = "عميل"
@@ -67,7 +57,6 @@ class Customer(models.Model):
         return f"{self.name} ({self.phone})"
     
     def generate_jwt_token(self):
-        """توليد JWT token"""
         payload = {
             'customer_id': self.id,
             'serial': self.serial,
@@ -81,7 +70,6 @@ class Customer(models.Model):
     
     @classmethod
     def get_customer_from_token(cls, token):
-        """استخراج العميل من JWT token"""
         try:
             payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=['HS256'])
             customer_id = payload.get('customer_id')
@@ -95,7 +83,6 @@ class Wallet(models.Model):
     balance = models.IntegerField(default=0)
     total_deposited = models.IntegerField(default=0)
     total_spent = models.IntegerField(default=0)
-    referral_earnings = models.IntegerField(default=0)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -108,7 +95,6 @@ class Transaction(models.Model):
         ('bonus', 'مكافأة تسجيل'),
         ('purchase', 'شراء ملف'),
         ('charge', 'شحن رصيد'),
-        ('referral', 'مكافأة إحالة'),
     ]
     
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='transactions')
@@ -121,7 +107,23 @@ class Transaction(models.Model):
     def __str__(self):
         return f"{self.customer.name} - {self.amount}"
 
-# ⭐ الإشارات الأساسية
+class BotRegistration(models.Model):
+    source = models.ForeignKey(Source, on_delete=models.CASCADE)
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    telegram_username = models.CharField(max_length=50, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.source.name} - {self.customer.name}"
+
+class JWTAuditLog(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    action = models.CharField(max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.customer.serial} - {self.action}"
+
 @receiver(post_save, sender=Customer)
 def create_customer_wallet(sender, instance, created, **kwargs):
     if created:
@@ -133,61 +135,9 @@ def create_customer_wallet(sender, instance, created, **kwargs):
             description='مكافأة التسجيل',
             source=instance.source
         )
-# أضف هذا الكلاس في نهاية models.py
-class JWTAuditLog(models.Model):
-    """سجلات تدقيق JWT"""
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='jwt_logs')
-    action = models.CharField(max_length=50)
-    token_fingerprint = models.CharField(max_length=64)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-   def __str__(self):
-        return f"{self.customer.serial} - {self.action}"
-    class BotRegistration(models.Model):
-    """تسجيلات البوتات (مبسط)"""
-    source = models.ForeignKey(Source, on_delete=models.CASCADE)
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
-    telegram_username = models.CharField(max_length=50, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"{self.source.name} - {self.customer.name}"
-
-class JWTAuditLog(models.Model):
-    """سجلات JWT (مبسط)"""
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
-    action = models.CharField(max_length=50)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"{self.customer.serial} - {self.action}"
-
-
-class BotRegistration(models.Model):
-    """تسجيلات البوتات (مبسط)"""
-    source = models.ForeignKey(Source, on_delete=models.CASCADE)
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
-    telegram_username = models.CharField(max_length=50, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"{self.source.name} - {self.customer.name}"
-
-
-class JWTAuditLog(models.Model):
-    """سجلات JWT (مبسط)"""
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
-    action = models.CharField(max_length=50)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"{self.customer.serial} - {self.action}"
 
 @receiver(post_save, sender=User)
 def link_customer_to_user(sender, instance, created, **kwargs):
-    """ربط المستخدم مع العميل"""
     if created:
         try:
             customer = Customer.objects.get(serial=instance.username)
