@@ -133,3 +133,15 @@ def create_customer_wallet(sender, instance, created, **kwargs):
             description='مكافأة التسجيل',
             source=instance.source
         )
+# أضف هذا الكلاس في نهاية models.py
+class JWTAuditLog(models.Model):
+    """سجلات تدقيق JWT"""
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='jwt_logs')
+    action = models.CharField(max_length=50)
+    token_fingerprint = models.CharField(max_length=64)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.customer.serial} - {self.action}"
