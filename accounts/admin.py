@@ -19,4 +19,4 @@ class TransactionAdmin(admin.ModelAdmin):
 
 # ⭐ التسجيل البسيط للباقي
 #admin.site.register(BotRegistration)
-admin.site.register(JWTAuditLog)
+#admin.site.register(JWTAuditLog)
