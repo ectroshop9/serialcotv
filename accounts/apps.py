@@ -1,11 +1,6 @@
-# accounts/apps.py
 from django.apps import AppConfig
 
 class AccountsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'accounts'
     verbose_name = 'حسابات العملاء'
-    
-    def ready(self):
-        # استيراد الإشارات عند تشغيل التطبيق
-        import accounts.signals
