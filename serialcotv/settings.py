@@ -27,7 +27,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
-
+AUTH_USER_MODEL = 'accounts.User'  # 'accounts' اسم التطبيق، 'User' اسم الموديل
     'accounts',
 ]
 
