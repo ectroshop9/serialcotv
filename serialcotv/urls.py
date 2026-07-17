@@ -10,9 +10,8 @@ def home(request):
     <html dir="rtl" lang="ar">
     <head><meta charset="UTF-8"><title>SerialCo TV API</title></head>
     <body>
-        <h1>🚀 SerialCo TV API</h1>
-        <p>نظام السيريالات</p>
-        <p>📞 الدعم: @serialco_support</p>
+        <h1>SerialCo TV API</h1>
+        <p>Serial System</p>
     </body>
     </html>
     """)
@@ -23,8 +22,8 @@ def reset_admin(request):
         user.set_password('Admin123456')
         user.is_active = True
         user.save()
-        return HttpResponse('✅ Password reset to Admin123456')
-    return HttpResponse('⚠️ User not found')
+        return HttpResponse('Password reset')
+    return HttpResponse('User not found')
 
 urlpatterns = [
     path('', home, name='home'),
@@ -33,12 +32,4 @@ urlpatterns = [
     path('api/accounts/', include('accounts.urls')),
     path('api/content/', include('content.urls')),
     path('api/serials/', include('serials.urls')),
-    path('api/health/', lambda r: JsonResponse({'status': 'healthy'}), name='api-health'),
-]
-    # ⭐ Health Check
-    path('api/health/', lambda r: JsonResponse({
-        'status': 'healthy',
-        'service': 'serialco-api',
-        'timestamp': datetime.now().isoformat()
-    }), name='api-health'),
 ]
