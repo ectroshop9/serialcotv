@@ -7,8 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ==================== إعدادات الأمان ====================
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-now')
-DEBUG = True  # ⭐ للتطوير
-# DEBUG = config('DEBUG', default=False, cast=bool)  # للإنتاج
+DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = [
     '.onrender.com',
@@ -16,11 +15,9 @@ ALLOWED_HOSTS = [
     '127.0.0.1', 
     '.serialco.tv',
     'www.serialco.tv',
-    '.cloudshell.dev',  # ⭐ Cloud Shell
-    '*',  # ⭐ للتطوير فقط
+    '.cloudshell.dev',
 ]
 
-# ⭐ أضف هذا القسم ⭐
 CSRF_TRUSTED_ORIGINS = [
     'https://*.cloudshell.dev',
     'https://*.serialco.tv',
@@ -77,28 +74,17 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
-# ==================== SQLite للتطوير ====================
+# ==================== PostgreSQL للإنتاج ====================
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': config('PGDATABASE', default='serialco'),
+        'USER': config('PGUSER', default='serialco_user'),
+        'PASSWORD': config('PGPASSWORD', default=''),
+        'HOST': config('PGHOST', default='dpg-d9d4vr6rnols73csfrt0-a'),
+        'PORT': config('PGPORT', default='5432'),
     }
 }
-
-# ==================== PostgreSQL للإنتاج (معطل حالياً) ====================
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': config('PGDATABASE', default=''),
-#         'USER': config('PGUSER', default=''),
-#         'PASSWORD': config('PGPASSWORD', default=''),
-#         'HOST': config('PGHOST', default=''),
-#         'PORT': config('PGPORT', default='5432'),
-#         'OPTIONS': {
-#             'sslmode': 'require',
-#         },
-#     }
-# }
 
 # ==================== إعدادات المصادقة ====================
 AUTH_PASSWORD_VALIDATORS = [
@@ -173,15 +159,15 @@ JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-32-char-jwt-secret-key-c
 JWT_ALGORITHM = 'HS256'
 WALLET_CHARGE_SECRET = config('WALLET_CHARGE_SECRET', default='wallet-secret-key-123')
 
-# ==================== إعدادات الأمان للإنتاج (معطلة للتطوير) ====================
-# if not DEBUG:
-#     SECURE_SSL_REDIRECT = True
-#     SESSION_COOKIE_SECURE = True
-#     CSRF_COOKIE_SECURE = True
-#     SECURE_BROWSER_XSS_FILTER = True
-#     SECURE_CONTENT_TYPE_NOSNIFF = True
-#     SECURE_HSTS_SECONDS = 31536000
-#     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-#     SECURE_HSTS_PRELOAD = True
-#     X_FRAME_OPTIONS = 'DENY'
-#     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# ==================== إعدادات الأمان للإنتاج ====================
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
