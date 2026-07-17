@@ -1,8 +1,6 @@
 from django.contrib import admin
 from django.urls import path, include
-from django.http import HttpResponse, JsonResponse
-from datetime import datetime
-from django.contrib.auth.models import User
+from django.http import HttpResponse
 
 def home(request):
     return HttpResponse("""
@@ -16,19 +14,9 @@ def home(request):
     </html>
     """)
 
-def reset_admin(request):
-    if User.objects.filter(username='admin').exists():
-        user = User.objects.get(username='admin')
-        user.set_password('Admin123456')
-        user.is_active = True
-        user.save()
-        return HttpResponse('Password reset')
-    return HttpResponse('User not found')
-
 urlpatterns = [
     path('', home, name='home'),
     path('admin/', admin.site.urls),
-    path('reset-admin/', reset_admin, name='reset-admin'),
     path('api/accounts/', include('accounts.urls')),
     path('api/content/', include('content.urls')),
     path('api/serials/', include('serials.urls')),
