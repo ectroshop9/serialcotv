@@ -17,21 +17,32 @@ def home(request):
     </html>
     """)
 
-def create_admin(request):
-    if not User.objects.filter(username='admin').exists():
-        User.objects.create_superuser('admin', 'admin@serialco.tv', 'Admin123456')
-        return HttpResponse('✅ Admin created')
-    return HttpResponse('⚠️ Admin already exists')
+def reset_admin(request):
+    if User.objects.filter(username='admin').exists():
+        user = User.objects.get(username='admin')
+        user.set_password('Admin123456')
+        user.is_active = True
+        user.save()
+        return HttpResponse('✅ Password reset to Admin123456')
+    return HttpResponse('⚠️ User not found')
 
 urlpatterns = [
     path('', home, name='home'),
     path('admin/', admin.site.urls),
-    path('create-admin/', create_admin, name='create-admin'),
+    path('reset-admin/', reset_admin, name='reset-admin'),
     
     # ⭐ مسارات API
     path('api/accounts/', include('accounts.urls')),
     path('api/content/', include('content.urls')),
     path('api/serials/', include('serials.urls')),
+
+    # ⭐ Health Check
+    path('api/health/', lambda r: JsonResponse({
+        'status': 'healthy',
+        'service': 'serialco-api',
+        'timestamp': datetime.now().isoformat()
+    }), name='api-health'),
+]
 
     # ⭐ Health Check
     path('api/health/', lambda r: JsonResponse({
