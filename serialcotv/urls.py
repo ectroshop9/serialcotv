@@ -30,20 +30,11 @@ urlpatterns = [
     path('', home, name='home'),
     path('admin/', admin.site.urls),
     path('reset-admin/', reset_admin, name='reset-admin'),
-    
-    # ⭐ مسارات API
     path('api/accounts/', include('accounts.urls')),
     path('api/content/', include('content.urls')),
     path('api/serials/', include('serials.urls')),
-
-    # ⭐ Health Check
-    path('api/health/', lambda r: JsonResponse({
-        'status': 'healthy',
-        'service': 'serialco-api',
-        'timestamp': datetime.now().isoformat()
-    }), name='api-health'),
+    path('api/health/', lambda r: JsonResponse({'status': 'healthy'}), name='api-health'),
 ]
-
     # ⭐ Health Check
     path('api/health/', lambda r: JsonResponse({
         'status': 'healthy',
