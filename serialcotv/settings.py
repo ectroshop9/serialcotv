@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
-
+import dj_database_url # تأكد من استيراد هذه المكتبة في الأعلى
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ==================== إعدادات الأمان ====================
@@ -76,14 +76,10 @@ WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
 # ==================== PostgreSQL للإنتاج ====================
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('PGDATABASE', default='serialco'),
-        'USER': config('PGUSER', default='serialco_user'),
-        'PASSWORD': config('PGPASSWORD', default=''),
-        'HOST': config('PGHOST', default='dpg-d9d4vr6rnols73csfrt0-a'),
-        'PORT': config('PGPORT', default='5432'),
-    }
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL'),
+        conn_max_age=600
+    )
 }
 
 # ==================== إعدادات المصادقة ====================
