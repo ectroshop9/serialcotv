@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
-class AccountsConfig(AppConfig):
+class SerialsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'accounts'
-    verbose_name = 'Accounts'
+    name = 'serials'
+    verbose_name = 'Serials'

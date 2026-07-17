@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Source, Customer, Wallet, Transaction
+from .models import Source, Customer, Transaction
 
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
@@ -7,16 +7,8 @@ class SourceAdmin(admin.ModelAdmin):
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
-    list_display = ('name', 'phone', 'serial', 'is_active')
-
-@admin.register(Wallet)
-class WalletAdmin(admin.ModelAdmin):
-    list_display = ('customer', 'balance')
+    list_display = ('name', 'phone', 'is_active', 'last_login')
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
-    list_display = ('customer', 'transaction_type', 'amount')
-
-# ⭐ التسجيل البسيط للباقي
-#admin.site.register(BotRegistration)
-#admin.site.register(JWTAuditLog)
+    list_display = ('customer', 'transaction_type', 'amount', 'created_at')
