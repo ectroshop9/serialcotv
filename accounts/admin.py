@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Source, Customer, Transaction
+from .models import Source, Customer, Transaction, Notification
 
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
@@ -12,3 +12,9 @@ class CustomerAdmin(admin.ModelAdmin):
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
     list_display = ('customer', 'transaction_type', 'amount', 'created_at')
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('title', 'notification_type', 'customer', 'is_read', 'created_at')
+    list_filter = ('notification_type', 'is_read')
+    search_fields = ('title', 'description')

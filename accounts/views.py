@@ -6,7 +6,7 @@ from django.utils import timezone
 import jwt
 from datetime import datetime, timedelta
 from django.conf import settings
-from .models import Customer, Transaction, Source
+from .models import Customer, Transaction, Source, Notification
 
 class CustomerJWTAuthentication:
     pass
@@ -196,4 +196,29 @@ class UpdateProfileAPI(APIView, JWTAuthMixin):
             'success': True,
             'message': 'تم تحديث الاسم بنجاح',
             'new_name': customer.name
+        })
+
+class NotificationListAPI(APIView, JWTAuthMixin):
+    def get(self, request):
+        customer = self.get_customer(request)
+        if not customer:
+            return Response({'success': False, 'message': 'المصادقة مطلوبة'}, status=401)
+        
+        notifications = Notification.objects.filter(
+            models.Q(customer=customer) | models.Q(customer__isnull=True)
+        ).order_by('-created_at')[:20]
+        
+        return Response({
+            'success': True,
+            'notifications': [
+                {
+                    'id': n.id,
+                    'title': n.title,
+                    'description': n.description,
+                    'type': n.notification_type,
+                    'is_read': n.is_read,
+                    'created_at': n.created_at.strftime('%Y-%m-%d %H:%M'),
+                }
+                for n in notifications
+            ]
         })

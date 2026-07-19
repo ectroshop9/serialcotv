@@ -59,3 +59,27 @@ class Transaction(models.Model):
     
     def __str__(self):
         return f"{self.customer.name}"
+
+class Notification(models.Model):
+    NOTIFICATION_TYPES = [
+        ('firmware', 'سوفتوير جديد'),
+        ('schematic', 'مخطط جديد'),
+        ('product', 'منتج جديد'),
+        ('update', 'تحديث نظام'),
+        ('info', 'معلومة'),
+    ]
+    
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, null=True, blank=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES, default='info')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "Notification"
+        verbose_name_plural = "Notifications"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return self.title
