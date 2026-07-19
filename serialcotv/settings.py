@@ -5,7 +5,6 @@ from decouple import config
 import dj_database_url # تأكد من استيراد هذه المكتبة في الأعلى
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ==================== إعدادات الأمان ====================
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-now')
 DEBUG = config('DEBUG', default=False, cast=bool)
 
@@ -24,7 +23,6 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.onrender.com',
 ]
 
-# ==================== التطبيقات المثبتة ====================
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -75,22 +73,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
-# ==================== PostgreSQL للإنتاج ====================
-DATABASES = {
+
+ DATABASES = {
     'default': dj_database_url.config(
         default=config('DATABASE_URL'),
         conn_max_age=600
     )
 }
 
-# ==================== SQLite للتطوير ====================
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.sqlite3',
 #         'NAME': BASE_DIR / 'db.sqlite3',
 #     }
 # }
-# ==================== إعدادات المصادقة ====================
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 8}},
@@ -98,14 +94,12 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# ==================== الإعدادات الدولية ====================
 LANGUAGE_CODE = 'ar'
 TIME_ZONE = 'Asia/Riyadh'
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True
 
-# ==================== الملفات الثابتة ====================
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
@@ -115,7 +109,6 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# ==================== CORS للمتجر ====================
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
     "https://serialco.tv",
@@ -139,7 +132,6 @@ CORS_ALLOW_HEADERS = [
     'x-forwarded-for',
 ]
 
-# ==================== إعدادات DRF ====================
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'accounts.authentication.CustomerJWTAuthentication',
@@ -158,12 +150,10 @@ REST_FRAMEWORK = {
     }
 }
 
-# ==================== إعدادات JWT الخاصة بك ====================
 JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-32-char-jwt-secret-key-change-this')
 JWT_ALGORITHM = 'HS256'
 WALLET_CHARGE_SECRET = config('WALLET_CHARGE_SECRET', default='wallet-secret-key-123')
 
-# ==================== إعدادات الأمان للإنتاج ====================
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
