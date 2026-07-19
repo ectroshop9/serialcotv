@@ -1,4 +1,7 @@
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from accounts.models import Notification
 
 class TVBrand(models.Model):
     name = models.CharField(max_length=100)
@@ -79,10 +82,9 @@ class Schematic(models.Model):
     
     def __str__(self):
         return f"{self.model} - {self.title}"
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from accounts.models import Notification
 
+
+# ==================== Signals ====================
 @receiver(post_save, sender=Firmware)
 def notify_new_firmware(sender, instance, created, **kwargs):
     if created:
