@@ -79,3 +79,24 @@ class Schematic(models.Model):
     
     def __str__(self):
         return f"{self.model} - {self.title}"
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from accounts.models import Notification
+
+@receiver(post_save, sender=Firmware)
+def notify_new_firmware(sender, instance, created, **kwargs):
+    if created:
+        Notification.objects.create(
+            title='سوفتوير جديد',
+            description=f'تم إضافة {instance.model} - v{instance.version}',
+            notification_type='firmware'
+        )
+
+@receiver(post_save, sender=Schematic)
+def notify_new_schematic(sender, instance, created, **kwargs):
+    if created:
+        Notification.objects.create(
+            title='مخطط جديد',
+            description=f'تم إضافة {instance.model} - {instance.title}',
+            notification_type='schematic'
+        )

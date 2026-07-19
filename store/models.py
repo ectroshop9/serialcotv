@@ -79,3 +79,16 @@ class OrderItem(models.Model):
     
     def __str__(self):
         return f"{self.product.name} x{self.quantity}"
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from accounts.models import Notification
+
+@receiver(post_save, sender=Product)
+def notify_new_product(sender, instance, created, **kwargs):
+    if created:
+        Notification.objects.create(
+            title='منتج جديد في المتجر',
+            description=f'تم إضافة {instance.name} - {instance.price} ر.س',
+            notification_type='product'
+        )
