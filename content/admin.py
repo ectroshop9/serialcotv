@@ -15,13 +15,13 @@ class TVModelAdmin(admin.ModelAdmin):
 
 @admin.register(Firmware)
 class FirmwareAdmin(admin.ModelAdmin):
-    list_display = ('model', 'version', 'downloads_count', 'is_active')
+    list_display = ('model', 'version', 'token_cost', 'downloads_count', 'is_active')
     list_filter = ('is_active', 'model__brand')
     search_fields = ('model__model_number', 'model__brand__name', 'version')
 
 @admin.register(Schematic)
 class SchematicAdmin(admin.ModelAdmin):
-    list_display = ('model', 'title', 'schematic_type', 'downloads_count', 'is_active')
+    list_display = ('model', 'title', 'schematic_type', 'token_cost', 'downloads_count', 'is_active')
     list_filter = ('schematic_type', 'is_active', 'model__brand')
     search_fields = ('title', 'model__model_number', 'model__brand__name')
 

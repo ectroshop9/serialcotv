@@ -43,6 +43,7 @@ class Firmware(models.Model):
     file_url = models.URLField(max_length=500, null=True, blank=True)
     cloud_url = models.URLField(max_length=500, null=True, blank=True)
     description = models.TextField(null=True, blank=True)
+    token_cost = models.IntegerField(default=500)
     downloads_count = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -53,7 +54,7 @@ class Firmware(models.Model):
         verbose_name_plural = "Firmwares"
     
     def __str__(self):
-        return f"{self.model} - v{self.version}"
+        return f"{self.model} - v{self.version} ({self.token_cost} tokens)"
 
 
 class Schematic(models.Model):
@@ -71,6 +72,7 @@ class Schematic(models.Model):
     file_url = models.URLField(max_length=500, null=True, blank=True)
     cloud_url = models.URLField(max_length=500, null=True, blank=True)
     description = models.TextField(null=True, blank=True)
+    token_cost = models.IntegerField(default=300)
     downloads_count = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -81,7 +83,7 @@ class Schematic(models.Model):
         verbose_name_plural = "Schematics"
     
     def __str__(self):
-        return f"{self.model} - {self.title}"
+        return f"{self.model} - {self.title} ({self.token_cost} tokens)"
 
 
 # ==================== Signals ====================

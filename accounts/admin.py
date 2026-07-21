@@ -7,7 +7,7 @@ class SourceAdmin(admin.ModelAdmin):
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
-    list_display = ('name', 'phone', 'is_active', 'last_login')
+    list_display = ('name', 'phone', 'token_balance', 'is_active', 'last_login')
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):

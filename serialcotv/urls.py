@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
 from django.http import HttpResponse
-
+from serials.views import chargily_webhook
 def home(request):
     return HttpResponse("""
     <!DOCTYPE html>
@@ -21,4 +21,6 @@ urlpatterns = [
     path('api/content/', include('content.urls')),
     path('api/serials/', include('serials.urls')),
     path('api/store/', include('store.urls')),
+    path('api/webhook/chargily/', chargily_webhook, name='chargily-webhook'),
+
 ]

@@ -74,19 +74,19 @@ TEMPLATES = [
 WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL'),
-        conn_max_age=600
-    )
-}
-
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.sqlite3',
 #         'NAME': BASE_DIR / 'db.sqlite3',
 #     }
 # }
+
+DATABASES = {
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL'),
+        conn_max_age=600
+    )
+}
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 8}},
@@ -165,3 +165,11 @@ if not DEBUG:
     SECURE_HSTS_PRELOAD = True
     X_FRAME_OPTIONS = 'DENY'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# Email Settings
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = 'SerialCo TV <noreply@serialco.tv>'

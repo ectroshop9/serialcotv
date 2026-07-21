@@ -20,6 +20,7 @@ class Source(models.Model):
 class Customer(models.Model):
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=15, unique=True)
+    token_balance = models.IntegerField(default=0)
     
     user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)
     source = models.ForeignKey(Source, on_delete=models.SET_NULL, null=True, blank=True)
@@ -35,7 +36,7 @@ class Customer(models.Model):
         verbose_name_plural = "Customers"
     
     def __str__(self):
-        return f"{self.name}"
+        return f"{self.name} ({self.token_balance} tokens)"
     
     def generate_jwt_token(self):
         payload = {
@@ -44,6 +45,17 @@ class Customer(models.Model):
             'type': 'customer'
         }
         return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm='HS256')
+    
+    def spend_tokens(self, amount):
+        if self.token_balance >= amount:
+            self.token_balance -= amount
+            self.save()
+            return True
+        return False
+    
+    def add_tokens(self, amount):
+        self.token_balance += amount
+        self.save()
 
 class Transaction(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
