@@ -6,7 +6,7 @@ gunicorn==23.0.0
 whitenoise==6.7.0
 django-cors-headers==4.4.0
 PyJWT==2.8.0
-psycopg[binary]
+psycopg2-binary==2.9.9
 Pillow
 dj-database-url==2.1.0
 requests
