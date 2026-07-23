@@ -2,7 +2,8 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
-import dj_database_url # تأكد من استيراد هذه المكتبة في الأعلى
+import dj_database_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-now')
@@ -15,12 +16,17 @@ ALLOWED_HOSTS = [
     '.serialco.tv',
     'www.serialco.tv',
     '.cloudshell.dev',
+    '.loca.lt',
+    '.github.dev',          # <-- إضافة نطاق GitHub Codespaces
+    '.githubpreview.dev',   # <-- نطاقات كودسبايس القديمة/الإضافية
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     'https://*.cloudshell.dev',
     'https://*.serialco.tv',
     'https://*.onrender.com',
+    'https://*.github.dev',         # <-- إضافة هنا أيضاً
+    'https://*.githubpreview.dev',
 ]
 
 INSTALLED_APPS = [
@@ -73,20 +79,23 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
+# Database Setup
+DATABASE_URL = config('DATABASE_URL', default=None)
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600
+        )
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
-
-DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL'),
-        conn_max_age=600
-    )
-}
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 8}},
@@ -109,14 +118,19 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# CORS Configuration
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
     "https://serialco.tv",
     "https://www.serialco.tv",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://*.onrender.com",
-    "https://*.cloudshell.dev",
+]
+
+# دعم النطاقات المتغيرة مثل *.onrender.com و *.cloudshell.dev
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.onrender\.com$",
+    r"^https://.*\.cloudshell\.dev$",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -130,6 +144,8 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-real-ip',
     'x-forwarded-for',
+    'signature',           # تم إضافته لـ Chargily Webhook
+    'chargily-signature',  # تم إضافته لـ Chargily Webhook
 ]
 
 REST_FRAMEWORK = {
@@ -154,6 +170,12 @@ JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-32-char-jwt-secret-key-c
 JWT_ALGORITHM = 'HS256'
 WALLET_CHARGE_SECRET = config('WALLET_CHARGE_SECRET', default='wallet-secret-key-123')
 
+# Chargily Payment Gateways
+CHARGILY_PUBLIC_KEY = config('CHARGILY_PUBLIC_KEY', default='test_pk_RgoRHouTnkD7UIAK5xqmHhHUxUMYXbMA3uoTjELW')
+CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='test_sk_BUiipcKlgliHR7gD7XSbSOFX2e7s39kK5R8apgTK')
+CHARGILY_APP_SECRET = config('CHARGILY_APP_SECRET', default='test_sk_BUiipcKlgliHR7gD7XSbSOFX2e7s39kK5R8apgTK')
+
+# Security Settings
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
@@ -165,6 +187,7 @@ if not DEBUG:
     SECURE_HSTS_PRELOAD = True
     X_FRAME_OPTIONS = 'DENY'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Email Settings
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
@@ -173,3 +196,10 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = 'SerialCo TV <noreply@serialco.tv>'
+
+# Cloud Shell Development Settings Overrides
+if 'cloudshell' in os.environ.get('HOME', ''):
+    DEBUG = True
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False

@@ -1,9 +1,10 @@
-# accounts/authentication.py
 import jwt
 from django.conf import settings
-from rest_framework.authentication import BaseAuthentication
 from django.contrib.auth.models import User
+from rest_framework import authentication
+from rest_framework.authentication import BaseAuthentication
 from .models import Customer
+
 
 class CustomerJWTAuthentication(BaseAuthentication):
     """مصادقة JWT مخصصة للعملاء"""
@@ -35,12 +36,31 @@ class CustomerJWTAuthentication(BaseAuthentication):
             
             customer = Customer.objects.get(id=customer_id, is_active=True)
             
+            # إذا العميل مرتبط بحساب Django User نستخدمه، وإلا نستخدم العميل نفسه
+            user = customer.user if customer.user else User.objects.get_or_create(
+                username=f"customer_{customer.id}",
+                defaults={'is_active': True}
+            )[0]
+            
+            # تحديث آخر دخول
+            from django.utils import timezone
+            customer.last_login = timezone.now()
+            customer.save(update_fields=['last_login'])
+            
             # إرفاق التوكن مع الطلب
             request.jwt_token = token
             request.jwt_payload = payload
+            request.customer = customer
             
             # إرجاع المستخدم والتوكن
-            return (customer.user if customer.user else None, token)
+            return (user, token)
             
-        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, Customer.DoesNotExist):
+        except jwt.ExpiredSignatureError:
             return None
+        except jwt.InvalidTokenError:
+            return None
+        except Customer.DoesNotExist:
+            return None
+    
+    def authenticate_header(self, request):
+        return 'Bearer realm="api"'

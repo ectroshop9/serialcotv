@@ -26,8 +26,6 @@ class Customer(models.Model):
     source = models.ForeignKey(Source, on_delete=models.SET_NULL, null=True, blank=True)
     
     is_active = models.BooleanField(default=True)
-    total_referrals = models.IntegerField(default=0)
-    referral_earnings = models.IntegerField(default=0)
     last_login = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
