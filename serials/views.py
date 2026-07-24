@@ -229,54 +229,68 @@ class SerialUsageHistoryAPI(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
 
+# ==================== دالة البحث العميق عن البريد ====================
+
+def find_email_in_dict(data):
+    """بحث عميق في كامل هيكل البيانات القادمة من Chargily لاستخراج أي بريد إلكتروني"""
+    if not isinstance(data, dict):
+        return ''
+    
+    # 1. البحث في المفاتيح المباشرة
+    for key in ['email', 'customer_email', 'client_email', 'payer_email', 'user_email']:
+        val = data.get(key)
+        if val and isinstance(val, str) and '@' in val:
+            return val.strip()
+            
+    # 2. البحث داخل الكائنات المتداخلة (customer, metadata, payer, ...)
+    for val in data.values():
+        if isinstance(val, dict):
+            found = find_email_in_dict(val)
+            if found:
+                return found
+                
+    return ''
+
 # ==================== Chargily Webhook ====================
 
 @csrf_exempt
 def chargily_webhook(request):
-    """استقبال Webhook من Chargily بعد الدفع الناجح مع فحص توقيع مرن واستخراج آمن للبريد"""
+    """استقبال Webhook من Chargily بعد الدفع الناجح بدون أي إيميل افتراضي"""
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
     # 1. جلب المفتاح والتوقيع
     raw_secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
     secret_bytes = raw_secret.encode('utf-8') if isinstance(raw_secret, str) else raw_secret
-    
-    signature = (
-        request.headers.get('signature') or 
-        request.headers.get('Chargily-Signature') or 
-        request.headers.get('x-signature') or 
-        ''
-    )
+    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or ''
 
-    # 2. حساب التوقيع المتوقع
-    computed_signature = hmac.new(
-        secret_bytes,
-        request.body,
-        hashlib.sha256
-    ).hexdigest()
+    # 2. حساب والتحقق من التوقيع
+    computed_signature = hmac.new(secret_bytes, request.body, hashlib.sha256).hexdigest()
 
-    # 3. التحقق من التوقيع (مرن في DEBUG، صارم في Production)
     if not hmac.compare_digest(computed_signature, signature):
         if getattr(settings, 'DEBUG', False):
-            print("⚠️ [DEBUG MODE]: تم تجاوز خطأ التوقيع للتجربة المحلية فقط.")
+            print("⚠️ [DEBUG MODE]: تم تجاوز خطأ التوقيع للتجربة المحلية.")
         else:
-            print("❌ فشل التحقق من توقيع Chargily (Production)")
             return JsonResponse({'error': 'Invalid signature'}, status=400)
 
-    # 4. استخراج بيانات الحمولة (Payload)
+    # 3. استخراج البيانات
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    event_type = payload.get('type', '')
-    if event_type != 'checkout.paid':
+    if payload.get('type') != 'checkout.paid':
         return JsonResponse({'status': 'ignored'}, status=200)
 
     checkout_data = payload.get('data', {}) or {}
-    checkout_id = checkout_data.get('id')  # رقم العملية الفريد من Chargily
 
-    # 🛑 أمان: فك تشفير metadata بأمان سواء كانت Dict أو String
+    # 🔍 طباعة كامل البيانات في السجلات لمعاينة البيانات الحقيقية القادمة من Chargily
+    print("🔍 [RAW CHARGILY PAYLOAD]:", json.dumps(checkout_data, ensure_ascii=False))
+
+    # 4. البحث العميق عن البريد الحقيقي (بدون أي افتراضات)
+    client_email = find_email_in_dict(checkout_data)
+
+    # 5. قراءة Metadata والاسم
     raw_metadata = checkout_data.get('metadata') or {}
     if isinstance(raw_metadata, str):
         try:
@@ -286,50 +300,26 @@ def chargily_webhook(request):
     else:
         metadata = raw_metadata
 
-    customer_id = metadata.get('user_id') or metadata.get('customer_id')
-    package_name = metadata.get('package_name', '')
-    package_id = metadata.get('package_id')
+    client_name = metadata.get('name') or metadata.get('client_name') or 'عميل SerialCo'
 
-    # 5. جلب الباقة
-    try:
-        if package_id:
-            package = SerialPackage.objects.get(id=package_id)
-        elif package_name:
-            package = SerialPackage.objects.get(name=package_name)
-        else:
-            package = SerialPackage.objects.first()
-            if not package:
-                print("❌ لا توجد أي باقات في قاعدة البيانات")
-                return JsonResponse({'error': 'No packages available'}, status=400)
-    except SerialPackage.DoesNotExist:
-        print("❌ الباقة المطلوبة غير موجودة")
+    # 6. جلب الباقة
+    package_id = metadata.get('package_id')
+    package_name = metadata.get('package_name')
+    package = None
+    
+    if package_id:
+        package = SerialPackage.objects.filter(id=package_id).first()
+    if not package and package_name:
+        package = SerialPackage.objects.filter(name=package_name).first()
+    if not package:
+        package = SerialPackage.objects.first()
+
+    if not package:
+        print("❌ لم يتم العثور على أي باقة في قاعدة البيانات")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 6. البحث الشامل عن البريد الإلكتروني والاسم (حل المشكلة الرئيسي)
-    customer_obj = checkout_data.get('customer') if isinstance(checkout_data.get('customer'), dict) else {}
-    payer_obj = checkout_data.get('payer') if isinstance(checkout_data.get('payer'), dict) else {}
-
-    client_email = (
-        metadata.get('email') or 
-        metadata.get('client_email') or 
-        metadata.get('user_email') or 
-        checkout_data.get('customer_email') or 
-        checkout_data.get('payer_email') or 
-        customer_obj.get('email') or 
-        payer_obj.get('email') or 
-        ''
-    )
-
-    client_name = (
-        metadata.get('name') or 
-        metadata.get('client_name') or 
-        checkout_data.get('customer_name') or 
-        customer_obj.get('name') or 
-        payer_obj.get('name') or 
-        'عميل SerialCo'
-    )
-
-    # 7. ربط الحساب الداخلي بالعميل + جلب البريد منه إن لم يجد في Chargily
+    # 7. ربط العميل المسجل إن وجد
+    customer_id = metadata.get('user_id') or metadata.get('customer_id')
     customer_instance = None
     if customer_id:
         try:
@@ -338,11 +328,6 @@ def chargily_webhook(request):
                 client_email = customer_instance.email
         except Customer.DoesNotExist:
             pass
-
-    # 🛑 تجربة محليّة: وضع إيميل تجريبي أثناء DEBUG إذا كان الإيميل فارغاً
-    if not client_email and getattr(settings, 'DEBUG', False):
-        client_email = getattr(settings, 'DEFAULT_TEST_EMAIL', 'test_user@gmail.com')
-        print(f"⚠️ [DEBUG MODE]: تم تعيين إيميل افتراضي للتجربة: {client_email}")
 
     # 8. إنشاء السيريال
     try:
@@ -361,7 +346,7 @@ def chargily_webhook(request):
         print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
         return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
-    # 9. إرسال البريد الإلكتروني
+    # 9. إرسال البريد الإلكتروني الحقيقي
     if client_email:
         try:
             send_mail(
@@ -380,9 +365,9 @@ def chargily_webhook(request):
             )
             print(f"📧 تم إرسال البريد إلى: {client_email}")
         except Exception as mail_err:
-            print(f"❌ خطأ في إرسال البريد (تأكد من إعدادات SMTP في settings.py): {mail_err}")
+            print(f"❌ خطأ أثناء إرسال البريد: {mail_err}")
     else:
-        print("⚠️ لم يتم إرسال إيميل لأن البريد الإلكتروني فارغ تماماً.")
+        print("⚠️ لم يتم العثور على أي بريد إلكتروني داخل طلب Chargily.")
 
     # 10. تحديث Google Sheet
     sheet_url = getattr(settings, 'GOOGLE_SHEET_URL', globals().get('GOOGLE_SHEET_URL', ''))
@@ -397,7 +382,7 @@ def chargily_webhook(request):
                 'pin': str(serial.pin),
                 'tokens': package.tokens_limit,
             }, timeout=4)
-            print(f"📊 تم تحديث Google Sheet للإيميل: {client_email}")
+            print(f"📊 تم تحديث Google Sheet للبريد: '{client_email}'")
         except Exception as sheet_err:
             print(f"❌ خطأ Google Sheet: {sheet_err}")
 
