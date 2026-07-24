@@ -20,8 +20,10 @@ from .models import SerialKey, SerialPackage, SerialUsage
 from .serializers import (
     ActivateSerialSerializer,
     CheckSerialSerializer,
+    SerialDownloadSerializer,
     SerialPackageSerializer,
     SerialUsageSerializer,
+    SerialVerifySerializer,
     UseTokenSerializer,
 )
 
@@ -56,7 +58,7 @@ class CheckSerialAPI(APIView):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        serial_number = serializer.validated_data.get('serial')
+        serial_number = serializer.validated_data.get('serial') or serializer.validated_data.get('serial_number')
         pin = serializer.validated_data.get('pin')
 
         try:
@@ -71,7 +73,7 @@ class CheckSerialAPI(APIView):
                     'message': 'السيريال منتهي',
                     'serial': {
                         'number': serial_key.serial_number,
-                        'package': serial_key.package.name,
+                        'package': serial_key.package.name if serial_key.package else '',
                         'tokens_total': serial_key.tokens_total,
                         'tokens_used': serial_key.tokens_used,
                         'tokens_remaining': 0,
@@ -83,7 +85,7 @@ class CheckSerialAPI(APIView):
                 'success': True,
                 'serial': {
                     'number': serial_key.serial_number,
-                    'package': serial_key.package.name,
+                    'package': serial_key.package.name if serial_key.package else '',
                     'tokens_total': serial_key.tokens_total,
                     'tokens_used': serial_key.tokens_used,
                     'tokens_remaining': serial_key.tokens_remaining,
@@ -110,7 +112,7 @@ class ActivateSerialAPI(APIView):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        serial_number = serializer.validated_data.get('serial')
+        serial_number = serializer.validated_data.get('serial') or serializer.validated_data.get('serial_number')
         pin = serializer.validated_data.get('pin')
         customer_id = serializer.validated_data.get('customer_id')
 
@@ -136,7 +138,7 @@ class ActivateSerialAPI(APIView):
                 'message': 'تم تفعيل السيريال بنجاح',
                 'serial': {
                     'number': serial_key.serial_number,
-                    'package': serial_key.package.name,
+                    'package': serial_key.package.name if serial_key.package else '',
                     'tokens_remaining': serial_key.tokens_remaining,
                 }
             }, status=status.HTTP_200_OK)
@@ -160,11 +162,11 @@ class UseTokenAPI(APIView):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        serial_number = serializer.validated_data.get('serial')
+        serial_number = serializer.validated_data.get('serial') or serializer.validated_data.get('serial_number')
         pin = serializer.validated_data.get('pin')
-        file_name = serializer.validated_data.get('file_name')
+        file_name = serializer.validated_data.get('file_name', 'Unspecified')
         file_type = serializer.validated_data.get('file_type', 'firmware')
-        token_amount = serializer.validated_data.get('token_amount')
+        token_amount = serializer.validated_data.get('token_amount', 1)
 
         try:
             with transaction.atomic():
@@ -216,7 +218,7 @@ class SerialUsageHistoryAPI(APIView):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        serial_number = serializer.validated_data.get('serial')
+        serial_number = serializer.validated_data.get('serial') or serializer.validated_data.get('serial_number')
         pin = serializer.validated_data.get('pin')
 
         try:
@@ -278,7 +280,7 @@ def chargily_webhook(request):
     package_name = metadata.get('package_name', '')
     package_id = metadata.get('package_id')
 
-    # 3. جلب الباقة أولاً
+    # 3. جلب الباقة
     try:
         if package_id:
             package = SerialPackage.objects.get(id=package_id)
@@ -293,7 +295,7 @@ def chargily_webhook(request):
         print("❌ الباقة المطلوبة غير موجودة")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 4. تنفيذ العملية داخل معاملة ذرية (Atomic Transaction)
+    # 4. التحديث في قاعدة البيانات
     try:
         with transaction.atomic():
             serial = SerialKey.objects.create(package=package)
@@ -354,7 +356,7 @@ def chargily_webhook(request):
         except Exception as fetch_err:
             print(f"⚠️ تجاوز جلب API للعميل بسبب: {fetch_err}")
 
-    # 6. إرسال البريد الإلكتروني
+    # 6. إرسال الإيميل
     if client_email:
         try:
             send_mail(
@@ -371,8 +373,6 @@ def chargily_webhook(request):
             print(f"📧 تم إرسال البريد إلى: {client_email}")
         except Exception as mail_err:
             print(f"❌ خطأ في إرسال البريد: {mail_err}")
-    else:
-        print("⚠️ لم يرسل الإيميل لأن خانة البريد فارغة.")
 
     # 7. تسجيل البيانات في Google Sheet
     try:
