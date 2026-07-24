@@ -228,138 +228,149 @@ class SerialUsageHistoryAPI(APIView):
                 'message': 'بيانات السيريال غير صحيحة'
             }, status=status.HTTP_404_NOT_FOUND)
 
-
 # ==================== Chargily Webhook ====================
 
 @csrf_exempt
 def chargily_webhook(request):
-    """استقبال Webhook من Chargily + إنشاء السيريال أوتوماتيكياً + إرسال الإيميل + تحديث Google Sheet"""
+    """4. استقبال Webhook من Chargily بعد الدفع الناجح"""
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
-
-    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or request.headers.get('x-signature')
-    secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
-
-    if secret:
-        computed_signature = hmac.new(
-            secret.encode('utf-8'),
-            request.body,
-            hashlib.sha256
-        ).hexdigest()
-
-        if not hmac.compare_digest(computed_signature, signature or ''):
-            print("❌ Chargily Signature Mismatch")
-            return JsonResponse({'error': 'Invalid signature'}, status=400)
-
+    
+    # 1. التحقق من التوقيع (Signature)
+    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature', '')
+    secret = getattr(settings, 'CHARGILY_APP_SECRET', '').encode('utf-8')
+    
+    computed_signature = hmac.new(
+        secret,
+        request.body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    if not hmac.compare_digest(computed_signature, signature or ''):
+        print("❌ فشل التحقق من توقيع Chargily (Signature Mismatch)")
+        return JsonResponse({'error': 'Invalid signature'}, status=400)
+    
+    # 2. استخراج البيانات
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    event_type = payload.get('type')
+    event_type = payload.get('type', '')
     if event_type != 'checkout.paid':
         return JsonResponse({'status': 'ignored'}, status=200)
-
-    checkout_data = payload.get('data', {})
-    checkout_id = checkout_data.get('id')
+    
+    checkout_data = payload.get('data', {}) or {}
     metadata = checkout_data.get('metadata') or {}
 
-    customer_id = metadata.get('user_id') or metadata.get('customer_id')
+    customer_id = metadata.get('user_id')
+    package_name = metadata.get('package_name', '')
     package_id = metadata.get('package_id')
-    package_name = metadata.get('package_name')
 
-    package = None
-    if package_id:
-        package = SerialPackage.objects.filter(id=package_id).first()
-    if not package and package_name:
-        package = SerialPackage.objects.filter(name=package_name).first()
-    if not package:
-        package = SerialPackage.objects.first()
-
-    if not package:
-        print("❌ لم يتم العثور على أي باقة")
-        return JsonResponse({'error': 'No package found'}, status=400)
-
+    # 3. جلب الباقة
     try:
-        with transaction.atomic():
-            serial = SerialKey()
-            serial.package = package
+        if package_id:
+            package = SerialPackage.objects.get(id=package_id)
+        elif package_name:
+            package = SerialPackage.objects.get(name=package_name)
+        else:
+            package = SerialPackage.objects.first()
+            if not package:
+                print("❌ لا توجد أي باقات أنشئت في قاعدة البيانات!")
+                return JsonResponse({'error': 'No packages available'}, status=400)
+    except SerialPackage.DoesNotExist:
+        print("❌ الباقة المطلوبة غير موجودة")
+        return JsonResponse({'error': 'Package not found'}, status=404)
 
-            if hasattr(package, 'tokens_limit'):
-                serial.tokens_total = package.tokens_limit
-                serial.tokens_remaining = package.tokens_limit
-
-            if customer_id:
-                try:
-                    customer = Customer.objects.select_for_update().get(id=customer_id, is_active=True)
-                    serial.customer = customer
-                    serial.used_at = timezone.now()
-
-                    if hasattr(customer, 'token_balance') and hasattr(package, 'tokens_limit'):
-                        customer.token_balance += package.tokens_limit
-                        customer.save()
-                except Customer.DoesNotExist:
-                    pass
-
-            serial.save()
-            print(f"✅ تم إنشاء السيريال أوتوماتيكياً: {serial.serial_number}")
-
+    # 4. إنشاء السيريال
+    try:
+        serial = SerialKey.objects.create(package=package)
+        print(f"✅ تم إنشاء السيريال بنجاح: {serial.serial_number}")
     except Exception as create_err:
         print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
-        return JsonResponse({'error': str(create_err)}, status=500)
+        return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
+    # 5. طباعة التشخيص لملاحظة هيكل البيانات الحقيقي من Chargily
+    print("🔍 [DEBUG Payload Data]:", json.dumps(checkout_data, ensure_ascii=False))
+
+    # استخراج الإيميل الموسع
+    customer_obj = checkout_data.get('customer') if isinstance(checkout_data.get('customer'), dict) else {}
+    
     client_email = (
-        checkout_data.get('customer_email') or
-        metadata.get('email') or
-        metadata.get('client_email') or
-        (checkout_data.get('customer') or {}).get('email') or
+        checkout_data.get('customer_email') or 
+        metadata.get('email') or 
+        metadata.get('client_email') or 
+        metadata.get('user_email') or 
+        customer_obj.get('email') or 
         ''
     )
-
+    
     client_name = (
-        checkout_data.get('customer_name') or
-        metadata.get('name') or
-        'عميل Chargily'
+        checkout_data.get('customer_name') or 
+        metadata.get('name') or 
+        metadata.get('client_name') or 
+        customer_obj.get('name') or 
+        'عميل SerialCo'
     )
 
+    # 6. ربط السيريال بحساب العميل الداخلي
+    if customer_id:
+        try:
+            customer = Customer.objects.get(id=customer_id, is_active=True)
+            serial.customer = customer
+            serial.used_at = timezone.now()
+            serial.save()
+            
+            customer.token_balance += package.tokens_limit
+            customer.save()
+            
+            # إذا لم نجد إيميل في الدفع، نأخذه من حساب العميل الداخلي
+            if not client_email and hasattr(customer, 'email'):
+                client_email = customer.email
+        except Customer.DoesNotExist:
+            pass
+
+    # 7. إرسال الإيميل (مع كشف الأخطاء fail_silently=False)
     if client_email:
         try:
             send_mail(
-                subject='SerialCo TV - تم تفعيل اشتراكك وتوليد السيريال',
+                subject='SerialCo TV - تم تفعيل اشتراكك',
                 message=(
                     f"مرحباً {client_name}،\n\n"
-                    f"شكراً لاشتراكك! تفاصيل السيريال الخاص بك:\n"
+                    f"شكراً لاشتراكك!\n\n"
                     f"الباقة: {package.name}\n"
                     f"السيريال: {serial.serial_number}\n"
                     f"البين: {serial.pin}\n\n"
-                    f"رابط اللوحة: https://serialcotv.vercel.app/dashboard"
+                    f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
                 ),
                 from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
                 recipient_list=[client_email],
-                fail_silently=True
+                fail_silently=False,  # أوقفنا الإخفاء لكي يظهر الخطأ الحقيقي في Render Logs إذا فشل الـ SMTP
             )
-            print(f"📧 تم إرسال البريد إلى: {client_email}")
+            print(f"📧 تم إرسال البريد بنجاح إلى: {client_email}")
         except Exception as mail_err:
-            print(f"❌ خطأ الإيميل: {mail_err}")
+            print(f"❌ خطأ SMTP أثناء إرسال البريد: {mail_err}")
+    else:
+        print("⚠️ لم يرسل الإيميل لأن خانة البريد فارغة (تأكد من تمرير metadata أثناء إنشاء Checkout).")
 
-    if GOOGLE_SHEET_URL:
-        try:
-            requests.post(GOOGLE_SHEET_URL, json={
-                'checkout_id': checkout_id,
-                'client': client_name,
-                'client_email': client_email,
-                'email': client_email,
-                'package': package.name,
-                'serial': str(serial.serial_number),
-                'pin': str(serial.pin),
-                'tokens': getattr(package, 'tokens_limit', 0),
-            }, timeout=5)
-            print("📊 تم تحديث Google Sheet بنجاح")
-        except Exception as sheet_err:
-            print(f"❌ خطأ Google Sheet: {sheet_err}")
+    # 8. تسجيل البيانات في Google Sheet
+    try:
+        requests.post(GOOGLE_SHEET_URL, json={
+            'client': client_name,
+            'client_email': client_email,
+            'email': client_email,
+            'package': package.name,
+            'serial': str(serial.serial_number),
+            'pin': str(serial.pin),
+            'tokens': package.tokens_limit,
+        }, timeout=4)
+        print("📊 تم إرسال البيانات إلى Google Sheet")
+    except Exception as sheet_err:
+        print(f"❌ خطأ Google Sheet: {sheet_err}")
 
     return JsonResponse({
         'success': True,
-        'serial': str(serial.serial_number),
-        'pin': str(serial.pin)
+        'serial': serial.serial_number,
+        'pin': serial.pin
     }, status=200)
+
