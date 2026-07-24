@@ -3,16 +3,17 @@ import hmac
 import json
 import logging
 import re
+import threading
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse
 
 import requests
 from django.conf import settings
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import transaction, IntegrityError, connection
 from django.db.models import F
+from django.db.models.functions import Coalesce
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
@@ -66,7 +67,6 @@ def clean_url(url: str) -> str:
         logger.error(f"URL parsing failed: {e}")
         return ''
     
-    logger.info(f"Cleaned URL: {url[:80]}...")
     return url
 
 
@@ -112,7 +112,7 @@ def extract_email_from_payload(data: Any, raw_body_str: str = "") -> Optional[st
         if match:
             return match.group(0)
 
-    return ""
+    return None
 
 
 def get_chargily_customer_email(customer_id: str, mode: str, api_secret_key: str) -> Optional[str]:
@@ -150,6 +150,125 @@ def parse_metadata(metadata: Any) -> Dict:
         except json.JSONDecodeError:
             logger.warning("Failed to parse metadata JSON")
     return {}
+
+
+# ✅ دالة المعالجة في الخلفية مع إغلاق اتصال DB
+# ملاحظة: إذا زاد حجم الطلبات (آلاف في الدقيقة)، يُفضل الترقية إلى Celery/RQ
+def async_post_processing(
+    client_email: str,
+    client_name: str,
+    package_id: int,
+    serial_id: int,
+    customer_instance_id: Optional[int],
+    customer_id: Optional[str],
+    sheet_url: str
+):
+    """
+    معالجة ما بعد الدفع في Thread منفصل
+    
+    Production Notes:
+    - يستخدم IDs فقط (Thread Safety)
+    - يغلق اتصال DB في finally (Connection Leak Prevention)
+    - مناسب للمشاريع المتوسطة (< 1000 طلب/دقيقة)
+    - للترقية المستقبلية: استخدم Celery مع automatic retries
+    """
+    try:
+        # جلب الكائنات من DB داخل الـ Thread
+        from .models import SerialKey, SerialPackage
+        from accounts.models import Customer
+        
+        package = SerialPackage.objects.get(id=package_id)
+        serial = SerialKey.objects.get(id=serial_id)
+        customer_instance = None
+        if customer_instance_id:
+            try:
+                customer_instance = Customer.objects.get(id=customer_instance_id)
+            except Customer.DoesNotExist:
+                pass
+        
+        # إرسال البريد الإلكتروني
+        if client_email:
+            try:
+                logger.info(f"📧 [Async] Sending email to {client_email}")
+                
+                if customer_instance:
+                    email_message = (
+                        f"مرحباً {client_name}،\n\n"
+                        f"تم تفعيل اشتراكك بنجاح وربطه بحسابك!\n\n"
+                        f"الباقة: {package.name}\n"
+                        f"السيريال: {serial.serial_number}\n"
+                        f"البين: {serial.pin}\n"
+                        f"عدد التوكنز: {package.tokens_limit}\n\n"
+                        f"رابط Dashboard: https://serialcotv.vercel.app/dashboard\n\n"
+                        f"يمكنك استخدام السيريال مباشرة من حسابك."
+                    )
+                else:
+                    email_message = (
+                        f"مرحباً {client_name}،\n\n"
+                        f"شكراً لاشتراكك! هذه بيانات السيريال الخاص بك:\n\n"
+                        f"الباقة: {package.name}\n"
+                        f"السيريال: {serial.serial_number}\n"
+                        f"البين: {serial.pin}\n"
+                        f"عدد التوكنز: {package.tokens_limit}\n\n"
+                        f"للاستفادة من اشتراكك:\n"
+                        f"1. سجل حساب جديد من هنا: https://serialcotv.vercel.app/register\n"
+                        f"2. فعّل السيريال من Dashboard\n\n"
+                        f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
+                    )
+                
+                send_mail(
+                    subject='SerialCo TV - تم تفعيل اشتراكك بنجاح 🎉',
+                    message=email_message,
+                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
+                    recipient_list=[client_email],
+                    fail_silently=True,
+                )
+                logger.info(f"✅ [Async] Email sent to {client_email}")
+                
+            except Exception as mail_err:
+                logger.error(f"❌ [Async] Email failed: {mail_err}")
+
+        # تحديث Google Sheet
+        if sheet_url:
+            try:
+                logger.info(f"📊 [Async] Updating Google Sheet...")
+                response = requests.post(
+                    sheet_url,
+                    json={
+                        'client': client_name,
+                        'client_email': client_email or 'No Email',
+                        'email': client_email or 'No Email',
+                        'package': package.name,
+                        'serial': str(serial.serial_number),
+                        'pin': str(serial.pin),
+                        'tokens': package.tokens_limit,
+                        'customer_id': customer_id or 'Not Linked',
+                    },
+                    timeout=10,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'SerialCoTV/1.0'
+                    }
+                )
+                
+                if response.status_code == 200:
+                    logger.info("✅ [Async] Google Sheet updated")
+                else:
+                    logger.warning(f"⚠️ [Async] Google Sheet status {response.status_code}")
+                    
+            except Exception as sheet_err:
+                logger.error(f"❌ [Async] Google Sheet failed: {sheet_err}")
+                
+    except Exception as e:
+        logger.error(f"💥 [Async] Post-processing failed: {e}", exc_info=True)
+        
+    finally:
+        # إغلاق اتصال DB لمنع تسريب الاتصالات
+        try:
+            connection.close()
+            logger.debug("🔌 [Async] Database connection closed")
+        except Exception as close_err:
+            logger.error(f"❌ [Async] Failed to close database connection: {close_err}")
 
 
 # ==================== API Views ====================
@@ -224,6 +343,17 @@ class ActivateSerialAPI(APIView):
                 'message': 'بيانات التفعيل غير مكتملة (serial_number, pin, customer_id)'
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # التحقق من العميل خارج نطاق atomic
+        try:
+            customer = Customer.objects.get(id=customer_id, is_active=True)
+        except Customer.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'الحساب غير موجود أو غير مفعل'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        response_data = None
+        
         try:
             with transaction.atomic():
                 serial_key = SerialKey.objects.select_for_update().get(
@@ -232,31 +362,32 @@ class ActivateSerialAPI(APIView):
                     customer__isnull=True
                 )
 
-                customer = get_object_or_404(Customer, id=customer_id, is_active=True)
-
                 serial_key.customer = customer
                 serial_key.used_at = timezone.now()
                 serial_key.save()
 
                 Customer.objects.filter(pk=customer.pk).update(
-                    token_balance=F('token_balance') + serial_key.tokens_remaining
+                    token_balance=Coalesce(F('token_balance'), 0) + serial_key.tokens_remaining
                 )
 
-            return Response({
-                'success': True,
-                'message': 'تم تفعيل السيريال بنجاح',
-                'serial': {
-                    'number': serial_key.serial_number,
-                    'package': serial_key.package.name if serial_key.package else '',
-                    'tokens_remaining': serial_key.tokens_remaining,
+                response_data = {
+                    'success': True,
+                    'message': 'تم تفعيل السيريال بنجاح',
+                    'serial': {
+                        'number': serial_key.serial_number,
+                        'package': serial_key.package.name if serial_key.package else '',
+                        'tokens_remaining': serial_key.tokens_remaining,
+                    }
                 }
-            }, status=status.HTTP_200_OK)
 
         except SerialKey.DoesNotExist:
             return Response({
                 'success': False,
                 'message': 'السيريال غير صحيح أو مفعل مسبقاً'
             }, status=status.HTTP_404_NOT_FOUND)
+
+        # إرجاع الرد خارج نطاق atomic
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class UseTokenAPI(APIView):
@@ -275,6 +406,8 @@ class UseTokenAPI(APIView):
         pin = serializer.validated_data['pin']
         file_id = serializer.validated_data['file_id']
 
+        tokens_after = None
+        
         try:
             with transaction.atomic():
                 serial_key = SerialKey.objects.select_for_update().get(
@@ -283,35 +416,39 @@ class UseTokenAPI(APIView):
                     is_active=True
                 )
 
-                tokens_before = serial_key.tokens_remaining
-
-                if serial_key.use_tokens(1):
-                    tokens_after = serial_key.tokens_remaining
-
-                    SerialUsage.objects.create(
-                        serial_key=serial_key,
-                        customer=serial_key.customer,
-                        file_name=f"File_ID_{file_id}",
-                        tokens_before=tokens_before,
-                        tokens_after=tokens_after
-                    )
-
-                    return Response({
-                        'success': True,
-                        'message': 'تم الخصم بنجاح وجاري التحميل',
-                        'tokens_remaining': tokens_after
-                    }, status=status.HTTP_200_OK)
-                else:
+                # ✅ تحسين: فحص الرصيد قبل البدء في التعديل
+                if serial_key.tokens_remaining < 1:
                     return Response({
                         'success': False,
                         'message': 'رصيد التوكن غير كافي'
                     }, status=status.HTTP_400_BAD_REQUEST)
+
+                tokens_before = serial_key.tokens_remaining
+                
+                # استخدام use_tokens بعد التأكد من كفاية الرصيد
+                serial_key.use_tokens(1)
+                tokens_after = serial_key.tokens_remaining
+
+                SerialUsage.objects.create(
+                    serial_key=serial_key,
+                    customer=serial_key.customer,
+                    file_name=f"File_ID_{file_id}",
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after
+                )
 
         except SerialKey.DoesNotExist:
             return Response({
                 'success': False,
                 'message': 'السيريال غير صحيح أو غير مفعل'
             }, status=status.HTTP_404_NOT_FOUND)
+
+        # إرجاع الرد خارج نطاق atomic
+        return Response({
+            'success': True,
+            'message': 'تم الخصم بنجاح وجاري التحميل',
+            'tokens_remaining': tokens_after
+        }, status=status.HTTP_200_OK)
 
 
 class SerialUsageHistoryAPI(APIView):
@@ -407,17 +544,11 @@ def chargily_webhook(request):
     checkout_id = checkout_data.get('id')
     logger.info(f"🆔 Checkout ID: {checkout_id}")
 
-    # 4. منع التكرار
-    if checkout_id and hasattr(SerialKey, 'payment_id'):
-        if SerialKey.objects.filter(payment_id=checkout_id).exists():
-            logger.info(f"🔄 Duplicate webhook: {checkout_id}")
-            return JsonResponse({'status': 'already_processed'}, status=200)
-
-    # 5. استخراج البريد الإلكتروني
+    # 4. استخراج البريد الإلكتروني
     client_email = extract_email_from_payload(checkout_data, raw_body_text)
     logger.info(f"📧 Email from payload: {client_email}")
 
-    # 6. جلب البريد من Chargily API إذا لم يكن موجوداً
+    # 5. جلب البريد من Chargily API إذا لم يكن موجوداً
     chargily_customer_id = checkout_data.get('customer_id')
     if not client_email and chargily_customer_id:
         mode = checkout_data.get('account', {}).get('mode', 'test')
@@ -425,17 +556,17 @@ def chargily_webhook(request):
             chargily_customer_id, 
             mode, 
             api_secret_key
-        ) or ''
+        )
         logger.info(f"📧 Email from API: {client_email}")
 
-    # 7. تحليل metadata
+    # 6. تحليل metadata
     metadata = parse_metadata(checkout_data.get('metadata', {}))
     client_name = metadata.get('name', '') or \
                   metadata.get('client_name', '') or \
                   'عميل SerialCo'
     logger.info(f"👤 Client: {client_name}")
 
-    # 8. البحث عن الباقة
+    # 7. البحث عن الباقة
     package_id = metadata.get('package_id')
     package_name = metadata.get('package_name')
     package = None
@@ -455,11 +586,10 @@ def chargily_webhook(request):
 
     logger.info(f"📦 Package: {package.name}")
 
-    # 9. ربط العميل المسجل (البحث بـ customer_id أو بالبريد الإلكتروني تلقائياً)
+    # 8. ربط العميل المسجل
     customer_id = metadata.get('user_id') or metadata.get('customer_id')
     customer_instance = None
 
-    # أ) البحث بـ ID إن وجد
     if customer_id:
         try:
             customer_instance = Customer.objects.get(id=customer_id, is_active=True)
@@ -469,7 +599,6 @@ def chargily_webhook(request):
         except Customer.DoesNotExist:
             logger.warning(f"⚠️ Customer ID {customer_id} not found")
 
-    # ب) إذا لم نجد ID وكان لدينا بريد إلكتروني، نبحث عن العميل بالإيميل
     if not customer_instance and client_email:
         customer_instance = Customer.objects.filter(
             email__iexact=client_email,
@@ -482,7 +611,13 @@ def chargily_webhook(request):
         else:
             logger.info(f"ℹ️ No customer found with email: {client_email}")
 
-    # 10. إنشاء السيريال وربطه بالعميل
+    # 9. إنشاء السيريال
+    serial_id = None
+    serial_number = None
+    serial_pin = None
+    package_id_value = package.id
+    customer_instance_id = customer_instance.id if customer_instance else None
+    
     try:
         with transaction.atomic():
             logger.info("🔑 Creating serial key...")
@@ -501,108 +636,57 @@ def chargily_webhook(request):
 
             serial = SerialKey.objects.create(**create_kwargs)
             
+            serial_id = serial.id
+            serial_number = serial.serial_number
+            serial_pin = serial.pin
+            
             logger.info(f"✅ Serial created!")
-            logger.info(f"   Number: {serial.serial_number}")
-            logger.info(f"   PIN: {serial.pin}")
+            logger.info(f"   Number: {serial_number}")
+            logger.info(f"   PIN: {serial_pin}")
             logger.info(f"   Package: {package.name}")
             logger.info(f"   Tokens: {package.tokens_limit}")
             logger.info(f"   Customer: {customer_instance.email if customer_instance else 'None'}")
 
-            # إضافة التوكنز لرصيد العميل
             if customer_instance:
                 Customer.objects.filter(pk=customer_instance.pk).update(
-                    token_balance=F('token_balance') + package.tokens_limit
+                    token_balance=Coalesce(F('token_balance'), 0) + package.tokens_limit
                 )
                 logger.info(f"💰 Added {package.tokens_limit} tokens to customer")
 
+    except IntegrityError:
+        logger.info(f"🔄 Duplicate checkout_id detected via DB constraint: {checkout_id}")
+        return JsonResponse({'status': 'already_processed'}, status=200)
+        
     except Exception as create_err:
         logger.error(f"❌ Failed to create serial: {create_err}", exc_info=True)
         return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
-    # 11. إرسال البريد الإلكتروني
-    if client_email:
-        try:
-            logger.info(f"📧 Sending email to {client_email}")
-            
-            if customer_instance:
-                email_message = (
-                    f"مرحباً {client_name}،\n\n"
-                    f"تم تفعيل اشتراكك بنجاح وربطه بحسابك!\n\n"
-                    f"الباقة: {package.name}\n"
-                    f"السيريال: {serial.serial_number}\n"
-                    f"البين: {serial.pin}\n"
-                    f"عدد التوكنز: {package.tokens_limit}\n\n"
-                    f"رابط Dashboard: https://serialcotv.vercel.app/dashboard\n\n"
-                    f"يمكنك استخدام السيريال مباشرة من حسابك."
-                )
-            else:
-                email_message = (
-                    f"مرحباً {client_name}،\n\n"
-                    f"شكراً لاشتراكك! هذه بيانات السيريال الخاص بك:\n\n"
-                    f"الباقة: {package.name}\n"
-                    f"السيريال: {serial.serial_number}\n"
-                    f"البين: {serial.pin}\n"
-                    f"عدد التوكنز: {package.tokens_limit}\n\n"
-                    f"للاستفادة من اشتراكك:\n"
-                    f"1. سجل حساب جديد من هنا: https://serialcotv.vercel.app/register\n"
-                    f"2. فعّل السيريال من Dashboard\n\n"
-                    f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
-                )
-            
-            send_mail(
-                subject='SerialCo TV - تم تفعيل اشتراكك بنجاح 🎉',
-                message=email_message,
-                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
-                recipient_list=[client_email],
-                fail_silently=True,
-            )
-            logger.info(f"✅ Email sent to {client_email}")
-            
-        except Exception as mail_err:
-            logger.error(f"❌ Email failed: {mail_err}")
-
-    # 12. تحديث Google Sheet
-    logger.info("📊 Updating Google Sheet...")
-    try:
-        sheet_url = clean_url(getattr(settings, 'GOOGLE_SHEET_URL', ''))
-        if sheet_url:
-            response = requests.post(
-                sheet_url,
-                json={
-                    'client': client_name,
-                    'client_email': client_email or 'No Email',
-                    'email': client_email or 'No Email',
-                    'package': package.name,
-                    'serial': str(serial.serial_number),
-                    'pin': str(serial.pin),
-                    'tokens': package.tokens_limit,
-                    'customer_id': customer_id or 'Not Linked',
-                },
-                timeout=10,
-                headers={
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'SerialCoTV/1.0'
-                }
-            )
-            
-            if response.status_code == 200:
-                logger.info("✅ Google Sheet updated")
-            else:
-                logger.warning(f"⚠️ Google Sheet status {response.status_code}")
-        else:
-            logger.warning("⚠️ Google Sheet URL is empty")
-            
-    except Exception as sheet_err:
-        logger.error(f"❌ Google Sheet failed: {sheet_err}")
-
+    # تشغيل المعالجة اللاحقة في Thread منفصل
+    sheet_url = clean_url(getattr(settings, 'GOOGLE_SHEET_URL', ''))
+    
+    threading.Thread(
+        target=async_post_processing,
+        args=(
+            client_email,
+            client_name,
+            package_id_value,
+            serial_id,
+            customer_instance_id,
+            customer_id,
+            sheet_url
+        ),
+        daemon=True
+    ).start()
+    
+    logger.info("🚀 Post-processing started in background thread")
     logger.info("=" * 50)
     logger.info("🎉 Webhook completed successfully!")
     logger.info("=" * 50)
     
     return JsonResponse({
         'success': True,
-        'serial': serial.serial_number,
-        'pin': serial.pin,
+        'serial': serial_number,
+        'pin': serial_pin,
         'customer_linked': customer_instance is not None,
-        'customer_email': client_email or None,
+        'customer_email': client_email,
     }, status=200)
