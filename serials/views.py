@@ -234,59 +234,6 @@ class SerialUsageHistoryAPI(APIView):
 EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
 
 def extract_email_from_payload(data, raw_body_str=""):
-    """
-    بحث شامل واستخراج للبريد الإلكتروني:
-    1. يفحص القواميس والقوائم والنصوص المتداخلة.
-    2. يستخدم Regex على كامل النص الخام كحل أخير ومضمون.
-    """
-    def _recursive_search(val):
-        if not val:
-            return ''
-        if isinstance(val, dict):
-            for key in ['email', 'customer_email', 'client_email', 'payer_email', 'user_email']:
-                v = val.get(key)
-                if v and isinstance(v, str) and '@' in v:
-                    return v.strip()
-            for v in val.values():
-                res = _recursive_search(v)
-                if res:
-                    return res
-        elif isinstance(val, list):
-            for item in val:
-                res = _recursive_search(item)
-                if res:
-                    return res
-        elif isinstance(val, str):
-            if val.startswith('{') or val.startswith('['):
-                try:
-                    res = _recursive_search(json.loads(val))
-                    if res:
-                        return res
-                except Exception:
-                    pass
-            match = re.search(EMAIL_REGEX, val)
-            if match:
-                return match.group(0)
-        return ''
-
-    # 1. محاولة البحث الهيكلي
-    email = _recursive_search(data)
-    if email:
-        return email
-
-    # 2. محاولة أخيرة: مسح كامل النص الخام القادم في الطلب بواسطة Regex
-    if raw_body_str:
-        match = re.search(EMAIL_REGEX, raw_body_str)
-        if match:
-            return match.group(0)
-
-    return ''
-
-# ==================== Chargily Webhook ====================
-
-EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-
-def extract_email_from_payload(data, raw_body_str=""):
     """بحث محلي عن البريد داخل الهيكل أو النص"""
     def _recursive_search(val):
         if not val:
@@ -328,9 +275,11 @@ def chargily_webhook(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
-    # 1. جلب المفتاح والتوقيع
-    raw_secret = getattr(settings, 'CHARGILY_APP_SECRET', '') or getattr(settings, 'CHARGILY_SECRET_KEY', '')
-    secret_bytes = raw_secret.encode('utf-8') if isinstance(raw_secret, str) else raw_secret
+    # 1. جلب المفاتيح
+    webhook_secret = getattr(settings, 'CHARGILY_APP_SECRET', '') or getattr(settings, 'CHARGILY_SECRET_KEY', '')
+    api_secret_key = getattr(settings, 'CHARGILY_SECRET_KEY', '') or webhook_secret
+
+    secret_bytes = webhook_secret.encode('utf-8') if isinstance(webhook_secret, str) else webhook_secret
     signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or ''
 
     # 2. التحقق من التوقيع
@@ -354,10 +303,10 @@ def chargily_webhook(request):
 
     checkout_data = payload.get('data', {}) or {}
 
-    # 4. البحث المحلي عن البريد الإلكتروني
+    # 4. استخراج البريد محلياً
     client_email = extract_email_from_payload(checkout_data, raw_body_text)
 
-    # 5. إذا لم نجد الإيميل، نجتبه مباشرة من Chargily API عبر customer_id
+    # 5. إذا لم نجد الإيميل محلياً، نطلبه من Chargily API
     chargily_customer_id = checkout_data.get('customer_id')
     if not client_email and chargily_customer_id:
         try:
@@ -365,16 +314,19 @@ def chargily_webhook(request):
             api_base = "https://pay.chargily.net/test/api/v2" if mode == 'test' else "https://pay.chargily.net/api/v2"
             
             headers = {
-                "Authorization": f"Bearer {raw_secret}",
+                "Authorization": f"Bearer {api_secret_key}",
                 "Content-Type": "application/json"
             }
             res = requests.get(f"{api_base}/customers/{chargily_customer_id}", headers=headers, timeout=5)
+            
+            print(f"🌐 [CHARGILY API STATUS]: {res.status_code}")
+            print(f"📄 [CHARGILY API RESPONSE]: {res.text}")
+
             if res.status_code == 200:
                 cust_data = res.json()
                 client_email = cust_data.get('email') or ''
-                print(f"📩 تم جلب البريد من Chargily API بنجاح: '{client_email}'")
         except Exception as api_err:
-            print(f"❌ خطأ أثناء الاتصال بـ Chargily API لجلب العميل: {api_err}")
+            print(f"❌ خطأ أثناء الاتصال بـ Chargily API: {api_err}")
 
     # 6. قراءة Metadata والاسم
     raw_metadata = checkout_data.get('metadata') or {}
