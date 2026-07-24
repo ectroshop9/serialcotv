@@ -7,7 +7,6 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
@@ -51,7 +50,7 @@ class CheckSerialAPI(APIView):
         if not serializer.is_valid():
             return Response({
                 'success': False,
-                'message': 'بيانات غير صحيحة',
+                'message': 'بيانات مدخلة غير صحيحة',
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -119,7 +118,6 @@ class UseTokenAPI(APIView):
 
                 tokens_before = getattr(serial_key, 'tokens_remaining', 0)
 
-                # تنفيذ استخدام التوكن
                 if hasattr(serial_key, 'use_tokens') and serial_key.use_tokens(1):
                     tokens_after = getattr(serial_key, 'tokens_remaining', 0)
 
@@ -153,11 +151,10 @@ class UseTokenAPI(APIView):
 
 @csrf_exempt
 def chargily_webhook(request):
-    """استقبال Webhook من Chargily + إنشاء السيريال أوتوماتيكياً + الإيميل + Google Sheet"""
+    """استقبال Webhook من Chargily + إنشاء السيريال أوتوماتيكياً + إرسال الإيميل + تحديث Google Sheet"""
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    # 1. التحقق من التوقيع الرقمي (Signature)
     signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or request.headers.get('x-signature')
     secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
 
@@ -172,7 +169,6 @@ def chargily_webhook(request):
             print("❌ Chargily Signature Mismatch")
             return JsonResponse({'error': 'Invalid signature'}, status=400)
 
-    # 2. قراءة البيانات
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
@@ -190,7 +186,6 @@ def chargily_webhook(request):
     package_id = metadata.get('package_id')
     package_name = metadata.get('package_name')
 
-    # 3. تحديد الباقة
     package = None
     if package_id:
         package = SerialPackage.objects.filter(id=package_id).first()
@@ -203,7 +198,6 @@ def chargily_webhook(request):
         print("❌ لم يتم العثور على أي باقة")
         return JsonResponse({'error': 'No package found'}, status=400)
 
-    # 4. إنشاء السيريال أوتوماتيكياً
     try:
         with transaction.atomic():
             serial = SerialKey()
@@ -232,7 +226,6 @@ def chargily_webhook(request):
         print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
         return JsonResponse({'error': str(create_err)}, status=500)
 
-    # 5. استخراج بيانات العميل
     client_email = (
         checkout_data.get('customer_email') or
         metadata.get('email') or
@@ -247,7 +240,6 @@ def chargily_webhook(request):
         'عميل Chargily'
     )
 
-    # 6. إرسال البريد الإلكتروني
     if client_email:
         try:
             send_mail(
@@ -268,7 +260,6 @@ def chargily_webhook(request):
         except Exception as mail_err:
             print(f"❌ خطأ الإيميل: {mail_err}")
 
-    # 7. التحديث في Google Sheet
     if GOOGLE_SHEET_URL:
         try:
             requests.post(GOOGLE_SHEET_URL, json={
