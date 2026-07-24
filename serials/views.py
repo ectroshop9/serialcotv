@@ -221,7 +221,7 @@ def async_post_processing(
                     message=email_message,
                     from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
                     recipient_list=[client_email],
-                    fail_silently=True,
+                    fail_silently=False,
                 )
                 logger.info(f"✅ [Async] Email sent to {client_email}")
                 
