@@ -375,14 +375,10 @@ def chargily_webhook(request):
             'serial': serial.serial_number,
             'pin': serial.pin,
             'tokens': package.tokens_limit,
-        }, timeout=3)
+}, timeout=4)
+        print(f"📊 تم تحديث Google Sheet للبريد: '{client_email}'")
     except Exception as sheet_err:
         print(f"❌ خطأ Google Sheet: {sheet_err}")
-
-    return JsonResponse({
-        'success': True,
-        'serial': serial.serial_number,
-        'pin': serial.pin
 
     return JsonResponse({
         'success': True,
