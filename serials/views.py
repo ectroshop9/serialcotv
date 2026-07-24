@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
@@ -92,6 +93,55 @@ class CheckSerialAPI(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
 
+class ActivateSerialAPI(APIView):
+    """تفعيل السيريال للعميل (المطلوبة في urls.py)"""
+
+    def post(self, request):
+        serial_number = request.data.get('serial_number') or request.data.get('serial')
+        pin = request.data.get('pin')
+        customer_id = request.data.get('customer_id')
+
+        if not serial_number or not pin or not customer_id:
+            return Response({
+                'success': False,
+                'message': 'بيانات التفعيل غير مكتملة (serial_number, pin, customer_id)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                serial_key = SerialKey.objects.select_for_update().get(
+                    serial_number=serial_number,
+                    pin=pin,
+                    customer__isnull=True
+                )
+
+                customer = get_object_or_404(Customer, id=customer_id, is_active=True)
+
+                serial_key.customer = customer
+                serial_key.used_at = timezone.now()
+                serial_key.save()
+
+                if hasattr(customer, 'token_balance') and hasattr(serial_key, 'tokens_remaining'):
+                    customer.token_balance += serial_key.tokens_remaining
+                    customer.save()
+
+            return Response({
+                'success': True,
+                'message': 'تم تفعيل السيريال بنجاح',
+                'serial': {
+                    'number': serial_key.serial_number,
+                    'package': serial_key.package.name if serial_key.package else '',
+                    'tokens_remaining': getattr(serial_key, 'tokens_remaining', 0),
+                }
+            }, status=status.HTTP_200_OK)
+
+        except SerialKey.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'السيريال غير صحيح أو مفعل مسبقاً'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
 class UseTokenAPI(APIView):
     """خصم التوكن عند التحميل"""
 
@@ -144,6 +194,38 @@ class UseTokenAPI(APIView):
             return Response({
                 'success': False,
                 'message': 'السيريال غير صحيح أو غير مفعل'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
+class SerialUsageHistoryAPI(APIView):
+    """عرض سجل استخدامات السيريال"""
+
+    def post(self, request):
+        serializer = SerialVerifySerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'message': 'يرجى إدخال السيريال والبين',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serial_number = serializer.validated_data['serial_number']
+        pin = serializer.validated_data['pin']
+
+        try:
+            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin)
+            usages = SerialUsage.objects.filter(serial_key=serial_key).order_by('-created_at')
+            usage_serializer = SerialUsageSerializer(usages, many=True)
+
+            return Response({
+                'success': True,
+                'history': usage_serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except SerialKey.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'بيانات السيريال غير صحيحة'
             }, status=status.HTTP_404_NOT_FOUND)
 
 
