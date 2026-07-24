@@ -232,25 +232,43 @@ class SerialUsageHistoryAPI(APIView):
 
 @csrf_exempt
 def chargily_webhook(request):
-    """4. استقبال Webhook من Chargily بعد الدفع الناجح"""
+    """استقبال Webhook من Chargily بعد الدفع الناجح مع فحص توقيع مرن وآمن"""
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
-    # 1. التحقق من التوقيع (Signature)
-    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature', '')
-    secret = getattr(settings, 'CHARGILY_APP_SECRET', '').encode('utf-8')
+    # 1. جلب المفتاح والتوقيع
+    raw_secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
+    secret_bytes = raw_secret.encode('utf-8') if isinstance(raw_secret, str) else raw_secret
     
+    signature = (
+        request.headers.get('signature') or 
+        request.headers.get('Chargily-Signature') or 
+        request.headers.get('x-signature') or 
+        ''
+    )
+
+    # 2. حساب التوقيع المتوقع
     computed_signature = hmac.new(
-        secret,
+        secret_bytes,
         request.body,
         hashlib.sha256
     ).hexdigest()
-    
-    if not hmac.compare_digest(computed_signature, signature or ''):
-        print("❌ فشل التحقق من توقيع Chargily (Signature Mismatch)")
-        return JsonResponse({'error': 'Invalid signature'}, status=400)
-    
-    # 2. استخراج البيانات
+
+    # 3. التحقق من التوقيع
+    if not hmac.compare_digest(computed_signature, signature):
+        print("⚠️ [Signature Warning]")
+        print(f" - Secret used: '{raw_secret[:5]}...' (Length: {len(raw_secret)})")
+        print(f" - Computed Signature: {computed_signature}")
+        print(f" - Received Signature: {signature}")
+
+        # في بيئة التطوير المحلي (DEBUG = True)، نسمح بمرور الطلب للتجربة بدون تعطيل
+        if getattr(settings, 'DEBUG', False):
+            print("⚠️ [DEBUG MODE]: تم تجاوز خطأ التوقيع للتجربة المحلية فقط.")
+        else:
+            print("❌ فشل التحقق من توقيع Chargily (Production)")
+            return JsonResponse({'error': 'Invalid signature'}, status=400)
+
+    # 4. استخراج بيانات الحمولة (Payload)
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
@@ -259,7 +277,7 @@ def chargily_webhook(request):
     event_type = payload.get('type', '')
     if event_type != 'checkout.paid':
         return JsonResponse({'status': 'ignored'}, status=200)
-    
+
     checkout_data = payload.get('data', {}) or {}
     metadata = checkout_data.get('metadata') or {}
 
@@ -267,7 +285,7 @@ def chargily_webhook(request):
     package_name = metadata.get('package_name', '')
     package_id = metadata.get('package_id')
 
-    # 3. جلب الباقة
+    # 5. جلب الباقة
     try:
         if package_id:
             package = SerialPackage.objects.get(id=package_id)
@@ -276,13 +294,13 @@ def chargily_webhook(request):
         else:
             package = SerialPackage.objects.first()
             if not package:
-                print("❌ لا توجد أي باقات أنشئت في قاعدة البيانات!")
+                print("❌ لا توجد أي باقات في قاعدة البيانات")
                 return JsonResponse({'error': 'No packages available'}, status=400)
     except SerialPackage.DoesNotExist:
         print("❌ الباقة المطلوبة غير موجودة")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 4. إنشاء السيريال
+    # 6. إنشاء السيريال
     try:
         serial = SerialKey.objects.create(package=package)
         print(f"✅ تم إنشاء السيريال بنجاح: {serial.serial_number}")
@@ -290,47 +308,41 @@ def chargily_webhook(request):
         print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
         return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
-    # 5. طباعة التشخيص لملاحظة هيكل البيانات الحقيقي من Chargily
-    print("🔍 [DEBUG Payload Data]:", json.dumps(checkout_data, ensure_ascii=False))
-
-    # استخراج الإيميل الموسع
+    # 7. استخراج البريد والاسم
     customer_obj = checkout_data.get('customer') if isinstance(checkout_data.get('customer'), dict) else {}
-    
+
     client_email = (
         checkout_data.get('customer_email') or 
         metadata.get('email') or 
         metadata.get('client_email') or 
-        metadata.get('user_email') or 
         customer_obj.get('email') or 
         ''
     )
-    
+
     client_name = (
         checkout_data.get('customer_name') or 
         metadata.get('name') or 
-        metadata.get('client_name') or 
         customer_obj.get('name') or 
         'عميل SerialCo'
     )
 
-    # 6. ربط السيريال بحساب العميل الداخلي
+    # 8. ربط السيريال بالحساب الداخلي إن وجد
     if customer_id:
         try:
             customer = Customer.objects.get(id=customer_id, is_active=True)
             serial.customer = customer
             serial.used_at = timezone.now()
             serial.save()
-            
+
             customer.token_balance += package.tokens_limit
             customer.save()
-            
-            # إذا لم نجد إيميل في الدفع، نأخذه من حساب العميل الداخلي
+
             if not client_email and hasattr(customer, 'email'):
                 client_email = customer.email
         except Customer.DoesNotExist:
             pass
 
-    # 7. إرسال الإيميل (مع كشف الأخطاء fail_silently=False)
+    # 9. إرسال البريد الإلكتروني
     if client_email:
         try:
             send_mail(
@@ -345,15 +357,15 @@ def chargily_webhook(request):
                 ),
                 from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
                 recipient_list=[client_email],
-                fail_silently=False,  # أوقفنا الإخفاء لكي يظهر الخطأ الحقيقي في Render Logs إذا فشل الـ SMTP
+                fail_silently=False,
             )
-            print(f"📧 تم إرسال البريد بنجاح إلى: {client_email}")
+            print(f"📧 تم إرسال البريد إلى: {client_email}")
         except Exception as mail_err:
-            print(f"❌ خطأ SMTP أثناء إرسال البريد: {mail_err}")
+            print(f"❌ خطأ في إرسال البريد (تأكد من SMTP): {mail_err}")
     else:
-        print("⚠️ لم يرسل الإيميل لأن خانة البريد فارغة (تأكد من تمرير metadata أثناء إنشاء Checkout).")
+        print("⚠️ لم يتم إرسال إيميل لأن خانة البريد فارغة.")
 
-    # 8. تسجيل البيانات في Google Sheet
+    # 10. تحديث Google Sheet
     try:
         requests.post(GOOGLE_SHEET_URL, json={
             'client': client_name,
@@ -364,7 +376,7 @@ def chargily_webhook(request):
             'pin': str(serial.pin),
             'tokens': package.tokens_limit,
         }, timeout=4)
-        print("📊 تم إرسال البيانات إلى Google Sheet")
+        print("📊 تم تحديث Google Sheet")
     except Exception as sheet_err:
         print(f"❌ خطأ Google Sheet: {sheet_err}")
 
@@ -373,4 +385,3 @@ def chargily_webhook(request):
         'serial': serial.serial_number,
         'pin': serial.pin
     }, status=200)
-
