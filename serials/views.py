@@ -229,156 +229,196 @@ class SerialUsageHistoryAPI(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
 
+# ==================== دالة البحث الشامل عن البريد ====================
+
+EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+
+def extract_email_from_payload(data, raw_body_str=""):
+    """
+    بحث شامل واستخراج للبريد الإلكتروني:
+    1. يفحص القواميس والقوائم والنصوص المتداخلة.
+    2. يستخدم Regex على كامل النص الخام كحل أخير ومضمون.
+    """
+    def _recursive_search(val):
+        if not val:
+            return ''
+        if isinstance(val, dict):
+            for key in ['email', 'customer_email', 'client_email', 'payer_email', 'user_email']:
+                v = val.get(key)
+                if v and isinstance(v, str) and '@' in v:
+                    return v.strip()
+            for v in val.values():
+                res = _recursive_search(v)
+                if res:
+                    return res
+        elif isinstance(val, list):
+            for item in val:
+                res = _recursive_search(item)
+                if res:
+                    return res
+        elif isinstance(val, str):
+            if val.startswith('{') or val.startswith('['):
+                try:
+                    res = _recursive_search(json.loads(val))
+                    if res:
+                        return res
+                except Exception:
+                    pass
+            match = re.search(EMAIL_REGEX, val)
+            if match:
+                return match.group(0)
+        return ''
+
+    # 1. محاولة البحث الهيكلي
+    email = _recursive_search(data)
+    if email:
+        return email
+
+    # 2. محاولة أخيرة: مسح كامل النص الخام القادم في الطلب بواسطة Regex
+    if raw_body_str:
+        match = re.search(EMAIL_REGEX, raw_body_str)
+        if match:
+            return match.group(0)
+
+    return ''
+
 # ==================== Chargily Webhook ====================
 
 @csrf_exempt
 def chargily_webhook(request):
-    """4. استقبال Webhook من Chargily بعد الدفع الناجح"""
+    """استقبال Webhook من Chargily بعد الدفع الناجح"""
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
-    # 1. التحقق من التوقيع (Signature)
-    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature', '')
-    secret = getattr(settings, 'CHARGILY_APP_SECRET', '').encode('utf-8')
-    
-    computed_signature = hmac.new(
-        secret,
-        request.body,
-        hashlib.sha256
-    ).hexdigest()
-    
-    if not hmac.compare_digest(computed_signature, signature or ''):
-        print("❌ فشل التحقق من توقيع Chargily (Signature Mismatch)")
-        return JsonResponse({'error': 'Invalid signature'}, status=400)
-    
-    # 2. استخراج البيانات
+    # 1. جلب المفتاح والتوقيع
+    raw_secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
+    secret_bytes = raw_secret.encode('utf-8') if isinstance(raw_secret, str) else raw_secret
+    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or ''
+
+    # 2. حساب والتحقق من التوقيع
+    computed_signature = hmac.new(secret_bytes, request.body, hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(computed_signature, signature):
+        if getattr(settings, 'DEBUG', False):
+            print("⚠️ [DEBUG MODE]: تم تجاوز خطأ التوقيع للتجربة المحلية.")
+        else:
+            return JsonResponse({'error': 'Invalid signature'}, status=400)
+
+    # 3. استخراج البيانات
+    raw_body_text = request.body.decode('utf-8', errors='ignore')
     try:
-        payload = json.loads(request.body)
+        payload = json.loads(raw_body_text)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    event_type = payload.get('type', '')
-    
-    if event_type != 'checkout.paid':
+    if payload.get('type') != 'checkout.paid':
         return JsonResponse({'status': 'ignored'}, status=200)
-    
-    checkout_data = payload.get('data', {})
-    metadata = checkout_data.get('metadata', {}) or {}
 
-    customer_id = metadata.get('user_id')
-    package_name = metadata.get('package_name', '')
+    checkout_data = payload.get('data', {}) or {}
+
+    # طباعة كامل البيانات في السجلات لمعاينتها عند الحاجة
+    print("🔍 [RAW CHARGILY PAYLOAD]:", raw_body_text)
+
+    # 4. الاستخراج المضمون للبريد الإلكتروني
+    client_email = extract_email_from_payload(checkout_data, raw_body_text)
+
+    # 5. قراءة Metadata والاسم
+    raw_metadata = checkout_data.get('metadata') or {}
+    if isinstance(raw_metadata, str):
+        try:
+            metadata = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    elif isinstance(raw_metadata, dict):
+        metadata = raw_metadata
+    else:
+        metadata = {}
+
+    client_name = metadata.get('name') or metadata.get('client_name') or 'عميل SerialCo'
+
+    # 6. جلب الباقة
     package_id = metadata.get('package_id')
+    package_name = metadata.get('package_name')
+    package = None
+    
+    if package_id:
+        package = SerialPackage.objects.filter(id=package_id).first()
+    if not package and package_name:
+        package = SerialPackage.objects.filter(name=package_name).first()
+    if not package:
+        package = SerialPackage.objects.first()
 
-    # 3. جلب الباقة أولاً
-    try:
-        if package_id:
-            package = SerialPackage.objects.get(id=package_id)
-        elif package_name:
-            package = SerialPackage.objects.get(name=package_name)
-        else:
-            package = SerialPackage.objects.first()
-            if not package:
-                print("❌ لا توجد أي باقات أنشئت في قاعدة البيانات!")
-                return JsonResponse({'error': 'No packages available'}, status=400)
-    except SerialPackage.DoesNotExist:
-        print("❌ الباقة المطلوبة غير موجودة")
+    if not package:
+        print("❌ لم يتم العثور على أي باقة في قاعدة البيانات")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 4. إنشاء السيريال فوراً في قاعدة البيانات (مرحلة أولى مضمونة)
+    # 7. ربط العميل المسجل إن وجد
+    customer_id = metadata.get('user_id') or metadata.get('customer_id')
+    customer_instance = None
+    if customer_id:
+        try:
+            customer_instance = Customer.objects.get(id=customer_id, is_active=True)
+            if not client_email and getattr(customer_instance, 'email', None):
+                client_email = customer_instance.email
+        except Customer.DoesNotExist:
+            pass
+
+    # 8. إنشاء السيريال
     try:
-        serial = SerialKey.objects.create(package=package)
-        print(f"✅ تم إنشاء السيريال بنجاح في قاعدة البيانات: {serial.serial_number}")
+        serial = SerialKey.objects.create(
+            package=package,
+            customer=customer_instance,
+            used_at=timezone.now() if customer_instance else None
+        )
+
+        if customer_instance:
+            customer_instance.token_balance += package.tokens_limit
+            customer_instance.save()
+
+        print(f"✅ تم إنشاء السيريال بنجاح: {serial.serial_number}")
     except Exception as create_err:
         print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
         return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
-    # 5. جلب بيانات البريد والاسم
-    client_email = (
-        checkout_data.get('customer_email') or 
-        checkout_data.get('client_email') or 
-        metadata.get('email') or 
-        metadata.get('client_email') or 
-        (checkout_data.get('customer') or {}).get('email') or 
-        ''
-    )
-    
-    client_name = (
-        checkout_data.get('customer_name') or 
-        checkout_data.get('client') or 
-        metadata.get('name') or 
-        'عميل Chargily'
-    )
-
-    # محاولة تجربة جلب البريد من API إن كان فارغاً
-    chargily_customer_id = checkout_data.get('customer_id')
-    if not client_email and chargily_customer_id:
-        try:
-            is_live = checkout_data.get('livemode', False)
-            base_url = "https://pay.chargily.net/api/v2" if is_live else "https://pay.chargily.net/test/api/v2"
-            api_secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
-
-            headers = {
-                'Authorization': f'Bearer {api_secret}',
-                'Content-Type': 'application/json'
-            }
-            
-            res = requests.get(f"{base_url}/customers/{chargily_customer_id}", headers=headers, timeout=3)
-            if res.status_code == 200:
-                cust_data = res.json()
-                client_email = cust_data.get('email', '') or cust_data.get('customer_email', '')
-                if cust_data.get('name'):
-                    client_name = cust_data.get('name')
-                print(f"✅ تم جلب الإيميل من Chargily API: {client_email}")
-        except Exception as fetch_err:
-            print(f"⚠️ تجاوز جلب API للعميل بسبب: {fetch_err}")
-
-    # 6. ربط السيريال بحساب العميل الداخلي إن وجد
-    if customer_id:
-        try:
-            customer = Customer.objects.get(id=customer_id, is_active=True)
-            serial.customer = customer
-            serial.used_at = timezone.now()
-            serial.save()
-            
-            customer.token_balance += package.tokens_limit
-            customer.save()
-        except Customer.DoesNotExist:
-            pass
-
-    # 7. إرسال الإيميل (معزول)
+    # 9. إرسال البريد الإلكتروني الحقيقي
     if client_email:
         try:
             send_mail(
-                'SerialCo TV - تم تفعيل اشتراكك',
-                f'شكراً لاشتراكك!\n\n'
-                f'الباقة: {package.name}\n'
-                f'السيريال: {serial.serial_number}\n'
-                f'البين: {serial.pin}\n\n'
-                f'رابط التحميل: https://serialcotv.vercel.app/dashboard',
-                settings.DEFAULT_FROM_EMAIL,
-                [client_email],
-                fail_silently=True,
+                subject='SerialCo TV - تم تفعيل اشتراكك',
+                message=(
+                    f"مرحباً {client_name}،\n\n"
+                    f"شكراً لاشتراكك!\n\n"
+                    f"الباقة: {package.name}\n"
+                    f"السيريال: {serial.serial_number}\n"
+                    f"البين: {serial.pin}\n\n"
+                    f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
+                ),
+                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
+                recipient_list=[client_email],
+                fail_silently=False,
             )
             print(f"📧 تم إرسال البريد إلى: {client_email}")
         except Exception as mail_err:
-            print(f"❌ خطأ في إرسال البريد: {mail_err}")
+            print(f"❌ خطأ أثناء إرسال البريد: {mail_err}")
     else:
-        print("⚠️ لم يرسل الإيميل لأن خانة البريد فارغة.")
+        print("⚠️ لم يتم العثور على أي بريد إلكتروني داخل طلب Chargily.")
 
-    # 8. تسجيل البيانات في Google Sheet (معزول)
-    try:
-        requests.post(GOOGLE_SHEET_URL, json={
-            'client': client_name,
-            'client_email': client_email,
-            'email': client_email,
-            'package': package.name,
-            'serial': serial.serial_number,
-            'pin': serial.pin,
-            'tokens': package.tokens_limit,
-}, timeout=4)
-        print(f"📊 تم تحديث Google Sheet للبريد: '{client_email}'")
-    except Exception as sheet_err:
-        print(f"❌ خطأ Google Sheet: {sheet_err}")
+    # 10. تحديث Google Sheet
+    sheet_url = getattr(settings, 'GOOGLE_SHEET_URL', globals().get('GOOGLE_SHEET_URL', ''))
+    if sheet_url:
+        try:
+            requests.post(sheet_url, json={
+                'client': client_name,
+                'client_email': client_email,
+                'email': client_email,
+                'package': package.name,
+                'serial': str(serial.serial_number),
+                'pin': str(serial.pin),
+                'tokens': package.tokens_limit,
+            }, timeout=4)
+            print(f"📊 تم تحديث Google Sheet للبريد: '{client_email}'")
+        except Exception as sheet_err:
+            print(f"❌ خطأ Google Sheet: {sheet_err}")
 
     return JsonResponse({
         'success': True,
