@@ -284,6 +284,44 @@ def extract_email_from_payload(data, raw_body_str=""):
 
 # ==================== Chargily Webhook ====================
 
+EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+
+def extract_email_from_payload(data, raw_body_str=""):
+    """بحث محلي عن البريد داخل الهيكل أو النص"""
+    def _recursive_search(val):
+        if not val:
+            return ''
+        if isinstance(val, dict):
+            for key in ['email', 'customer_email', 'client_email', 'payer_email', 'user_email']:
+                v = val.get(key)
+                if v and isinstance(v, str) and '@' in v:
+                    return v.strip()
+            for v in val.values():
+                res = _recursive_search(v)
+                if res:
+                    return res
+        elif isinstance(val, list):
+            for item in val:
+                res = _recursive_search(item)
+                if res:
+                    return res
+        elif isinstance(val, str):
+            match = re.search(EMAIL_REGEX, val)
+            if match:
+                return match.group(0)
+        return ''
+
+    email = _recursive_search(data)
+    if email:
+        return email
+
+    if raw_body_str:
+        match = re.search(EMAIL_REGEX, raw_body_str)
+        if match:
+            return match.group(0)
+
+    return ''
+
 @csrf_exempt
 def chargily_webhook(request):
     """استقبال Webhook من Chargily بعد الدفع الناجح"""
@@ -291,11 +329,11 @@ def chargily_webhook(request):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
     # 1. جلب المفتاح والتوقيع
-    raw_secret = getattr(settings, 'CHARGILY_APP_SECRET', '')
+    raw_secret = getattr(settings, 'CHARGILY_APP_SECRET', '') or getattr(settings, 'CHARGILY_SECRET_KEY', '')
     secret_bytes = raw_secret.encode('utf-8') if isinstance(raw_secret, str) else raw_secret
     signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or ''
 
-    # 2. حساب والتحقق من التوقيع
+    # 2. التحقق من التوقيع
     computed_signature = hmac.new(secret_bytes, request.body, hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(computed_signature, signature):
@@ -316,13 +354,29 @@ def chargily_webhook(request):
 
     checkout_data = payload.get('data', {}) or {}
 
-    # طباعة كامل البيانات في السجلات لمعاينتها عند الحاجة
-    print("🔍 [RAW CHARGILY PAYLOAD]:", raw_body_text)
-
-    # 4. الاستخراج المضمون للبريد الإلكتروني
+    # 4. البحث المحلي عن البريد الإلكتروني
     client_email = extract_email_from_payload(checkout_data, raw_body_text)
 
-    # 5. قراءة Metadata والاسم
+    # 5. إذا لم نجد الإيميل، نجتبه مباشرة من Chargily API عبر customer_id
+    chargily_customer_id = checkout_data.get('customer_id')
+    if not client_email and chargily_customer_id:
+        try:
+            mode = checkout_data.get('account', {}).get('mode', 'test')
+            api_base = "https://pay.chargily.net/test/api/v2" if mode == 'test' else "https://pay.chargily.net/api/v2"
+            
+            headers = {
+                "Authorization": f"Bearer {raw_secret}",
+                "Content-Type": "application/json"
+            }
+            res = requests.get(f"{api_base}/customers/{chargily_customer_id}", headers=headers, timeout=5)
+            if res.status_code == 200:
+                cust_data = res.json()
+                client_email = cust_data.get('email') or ''
+                print(f"📩 تم جلب البريد من Chargily API بنجاح: '{client_email}'")
+        except Exception as api_err:
+            print(f"❌ خطأ أثناء الاتصال بـ Chargily API لجلب العميل: {api_err}")
+
+    # 6. قراءة Metadata والاسم
     raw_metadata = checkout_data.get('metadata') or {}
     if isinstance(raw_metadata, str):
         try:
@@ -336,7 +390,7 @@ def chargily_webhook(request):
 
     client_name = metadata.get('name') or metadata.get('client_name') or 'عميل SerialCo'
 
-    # 6. جلب الباقة
+    # 7. جلب الباقة
     package_id = metadata.get('package_id')
     package_name = metadata.get('package_name')
     package = None
@@ -352,7 +406,7 @@ def chargily_webhook(request):
         print("❌ لم يتم العثور على أي باقة في قاعدة البيانات")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 7. ربط العميل المسجل إن وجد
+    # 8. ربط العميل المسجل إن وجد
     customer_id = metadata.get('user_id') or metadata.get('customer_id')
     customer_instance = None
     if customer_id:
@@ -363,7 +417,7 @@ def chargily_webhook(request):
         except Customer.DoesNotExist:
             pass
 
-    # 8. إنشاء السيريال
+    # 9. إنشاء السيريال
     try:
         serial = SerialKey.objects.create(
             package=package,
@@ -380,7 +434,7 @@ def chargily_webhook(request):
         print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
         return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
-    # 9. إرسال البريد الإلكتروني الحقيقي
+    # 10. إرسال البريد الإلكتروني
     if client_email:
         try:
             send_mail(
@@ -401,9 +455,9 @@ def chargily_webhook(request):
         except Exception as mail_err:
             print(f"❌ خطأ أثناء إرسال البريد: {mail_err}")
     else:
-        print("⚠️ لم يتم العثور على أي بريد إلكتروني داخل طلب Chargily.")
+        print("⚠️ لم يتم العثور على أي بريد إلكتروني.")
 
-    # 10. تحديث Google Sheet
+    # 11. تحديث Google Sheet
     sheet_url = getattr(settings, 'GOOGLE_SHEET_URL', globals().get('GOOGLE_SHEET_URL', ''))
     if sheet_url:
         try:
