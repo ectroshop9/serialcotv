@@ -188,3 +188,10 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = 'SerialCo TV <noreply@serialco.tv>'
+# ==================== Chargily Payment Settings ====================
+CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='test_sk_BUiipcKlgliHR7gD7XSbSOFX2e7s39kK5R8apgTK')
+CHARGILY_PUBLIC_KEY = config('CHARGILY_PUBLIC_KEY', default='test_pk_RgoRHouTnkD7UIAK5xqmHhHUxUMYXbMA3uoTjELW')
+CHARGILY_APP_SECRET = config('CHARGILY_APP_SECRET', default=CHARGILY_SECRET_KEY)
+
+# ==================== Google Sheet Integration ====================
+GOOGLE_SHEET_URL = config('GOOGLE_SHEET_URL', default='')
