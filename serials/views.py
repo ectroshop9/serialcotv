@@ -1,11 +1,15 @@
 import hashlib
 import hmac
 import json
-import requests
+import logging
 import re
+from typing import Optional, Dict, Any
+
+import requests
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import F
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -24,16 +28,17 @@ from .serializers import (
     SerialVerifySerializer,
 )
 
-GOOGLE_SHEET_URL = getattr(
-    settings,
-    'GOOGLE_SHEET_URL',
-    'https://script.google.com/macros/s/AKfycbzk9pPtYkLKeh0mFiBxG-jj_6vfCK9rIaPxPZwBuzWnVW2JUhItEDuXI_pE0qCrqN5u-g/exec'
-)
+logger = logging.getLogger(__name__)
+
+# Constants
+EMAIL_REGEX = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
+CHARGILY_TEST_API = "https://pay.chargily.net/test/api/v2"
+CHARGILY_LIVE_API = "https://pay.chargily.net/api/v2"
 
 
 class PackageListAPI(APIView):
     """عرض قائمة الباقات المتاحة"""
-
+    
     def get(self, request):
         packages = SerialPackage.objects.filter(is_active=True)
         serializer = SerialPackageSerializer(packages, many=True)
@@ -45,7 +50,7 @@ class PackageListAPI(APIView):
 
 class CheckSerialAPI(APIView):
     """التحقق من السيريال والبين"""
-
+    
     def post(self, request):
         serializer = SerialVerifySerializer(data=request.data)
         if not serializer.is_valid():
@@ -59,235 +64,26 @@ class CheckSerialAPI(APIView):
         pin = serializer.validated_data['pin']
 
         try:
-            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin)
+            serial_key = SerialKey.objects.get(
+                serial_number=serial_number, 
+                pin=pin
+            )
+            
+            tokens_remaining = serial_key.tokens_remaining
+            is_used_up = serial_key.is_used_up
 
-            tokens_remaining = getattr(serial_key, 'tokens_remaining', 0)
-            is_used_up = getattr(serial_key, 'is_used_up', tokens_remaining <= 0)
-
-            if is_used_up:
-                return Response({
-                    'success': False,
-                    'message': 'السيريال منتهي',
-                    'serial': {
-                        'number': serial_key.serial_number,
-                        'package': serial_key.package.name if serial_key.package else '',
-                        'tokens_remaining': 0,
-                        'status': 'منتهي'
-                    }
-                }, status=status.HTTP_200_OK)
-
-            return Response({
-                'success': True,
+            response_data = {
+                'success': not is_used_up,
+                'message': 'السيريال منتهي' if is_used_up else 'السيريال صالح',
                 'serial': {
                     'number': serial_key.serial_number,
                     'package': serial_key.package.name if serial_key.package else '',
-                    'tokens_remaining': tokens_remaining,
-                    'status': 'شغال'
+                    'tokens_remaining': tokens_remaining if not is_used_up else 0,
+                    'status': 'منتهي' if is_used_up else 'شغال'
                 }
-            }, status=status.HTTP_200_OK)
-
-        except SerialKey.DoesNotExist:
-            return Response({
-                'success': False,
-                'message': 'السيريال أو البين غير صحيح'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-
-class ActivateSerialAPI(APIView):
-    """تفعيل السيريال للعميل (المطلوبة في urls.py)"""
-
-    def post(self, request):
-        serial_number = request.data.get('serial_number') or request.data.get('serial')
-        pin = request.data.get('pin')
-        customer_id = request.data.get('customer_id')
-
-        if not serial_number or not pin or not customer_id:
-            return Response({
-                'success': False,
-                'message': 'بيانات التفعيل غير مكتملة (serial_number, pin, customer_id)'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            with transaction.atomic():
-                serial_key = SerialKey.objects.select_for_update().get(
-                    serial_number=serial_number,
-                    pin=pin,
-                    customer__isnull=True
-                )
-
-                customer = get_object_or_404(Customer, id=customer_id, is_active=True)
-
-                serial_key.customer = customer
-                serial_key.used_at = timezone.now()
-                serial_key.save()
-
-                if hasattr(customer, 'token_balance') and hasattr(serial_key, 'tokens_remaining'):
-                    customer.token_balance += serial_key.tokens_remaining
-                    customer.save()
-
-            return Response({
-                'success': True,
-                'message': 'تم تفعيل السيريال بنجاح',
-                'serial': {
-                    'number': serial_key.serial_number,
-                    'package': serial_key.package.name if serial_key.package else '',
-                    'tokens_remaining': getattr(serial_key, 'tokens_remaining', 0),
-                }
-            }, status=status.HTTP_200_OK)
-
-        except SerialKey.DoesNotExist:
-            return Response({
-                'success': False,
-                'message': 'السيريال غير صحيح أو مفعل مسبقاً'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-
-class UseTokenAPI(APIView):
-    """خصم التوكن عند التحميل"""
-
-    def post(self, request):
-        serializer = SerialDownloadSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'message': 'بيانات التحميل غير مكتملة',
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        serial_number = serializer.validated_data['serial_number']
-        pin = serializer.validated_data['pin']
-        file_id = serializer.validated_data['file_id']
-
-        try:
-            with transaction.atomic():
-                serial_key = SerialKey.objects.select_for_update().get(
-                    serial_number=serial_number,
-                    pin=pin,
-                    is_active=True
-                )
-
-                tokens_before = getattr(serial_key, 'tokens_remaining', 0)
-
-                if hasattr(serial_key, 'use_tokens') and serial_key.use_tokens(1):
-                    tokens_after = getattr(serial_key, 'tokens_remaining', 0)
-
-                    SerialUsage.objects.create(
-                        serial_key=serial_key,
-                        customer=serial_key.customer,
-                        file_name=f"File_ID_{file_id}",
-                        tokens_before=tokens_before,
-                        tokens_after=tokens_after
-                    )
-
-                    return Response({
-                        'success': True,
-                        'message': 'تم الخصم بنجاح وجاري التحميل',
-                        'tokens_remaining': tokens_after
-                    }, status=status.HTTP_200_OK)
-                else:
-                    return Response({
-                        'success': False,
-                        'message': 'رصيد التوكن غير كافي'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-        except SerialKey.DoesNotExist:
-            return Response({
-                'success': False,
-                'message': 'السيريال غير صحيح أو غير مفعل'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-
-class SerialUsageHistoryAPI(APIView):
-    """عرض سجل استخدامات السيريال"""
-
-    def post(self, request):
-        serializer = SerialVerifySerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'message': 'يرجى إدخال السيريال والبين',
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        serial_number = serializer.validated_data['serial_number']
-        pin = serializer.validated_data['pin']
-
-        try:
-            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin)
-            usages = SerialUsage.objects.filter(serial_key=serial_key).order_by('-created_at')
-            usage_serializer = SerialUsageSerializer(usages, many=True)
-
-            return Response({
-                'success': True,
-                'history': usage_serializer.data
-            }, status=status.HTTP_200_OK)
-
-        except SerialKey.DoesNotExist:
-            return Response({
-                'success': False,
-                'message': 'بيانات السيريال غير صحيحة'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-
-# ==================== دالة البحث الشامل عن البريد ====================
-
-EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-
-
-class PackageListAPI(APIView):
-    """عرض قائمة الباقات المتاحة"""
-
-    def get(self, request):
-        packages = SerialPackage.objects.filter(is_active=True)
-        serializer = SerialPackageSerializer(packages, many=True)
-        return Response({
-            'success': True,
-            'packages': serializer.data
-        }, status=status.HTTP_200_OK)
-
-
-class CheckSerialAPI(APIView):
-    """التحقق من السيريال والبين"""
-
-    def post(self, request):
-        serializer = SerialVerifySerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'message': 'بيانات مدخلة غير صحيحة',
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        serial_number = serializer.validated_data['serial_number']
-        pin = serializer.validated_data['pin']
-
-        try:
-            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin)
-
-            tokens_remaining = getattr(serial_key, 'tokens_remaining', 0)
-            is_used_up = getattr(serial_key, 'is_used_up', tokens_remaining <= 0)
-
-            if is_used_up:
-                return Response({
-                    'success': False,
-                    'message': 'السيريال منتهي',
-                    'serial': {
-                        'number': serial_key.serial_number,
-                        'package': serial_key.package.name if serial_key.package else '',
-                        'tokens_remaining': 0,
-                        'status': 'منتهي'
-                    }
-                }, status=status.HTTP_200_OK)
-
-            return Response({
-                'success': True,
-                'serial': {
-                    'number': serial_key.serial_number,
-                    'package': serial_key.package.name if serial_key.package else '',
-                    'tokens_remaining': tokens_remaining,
-                    'status': 'شغال'
-                }
-            }, status=status.HTTP_200_OK)
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
 
         except SerialKey.DoesNotExist:
             return Response({
@@ -298,13 +94,14 @@ class CheckSerialAPI(APIView):
 
 class ActivateSerialAPI(APIView):
     """تفعيل السيريال للعميل"""
-
+    
     def post(self, request):
         serial_number = request.data.get('serial_number') or request.data.get('serial')
         pin = request.data.get('pin')
         customer_id = request.data.get('customer_id')
 
-        if not serial_number or not pin or not customer_id:
+        # Validate required fields
+        if not all([serial_number, pin, customer_id]):
             return Response({
                 'success': False,
                 'message': 'بيانات التفعيل غير مكتملة (serial_number, pin, customer_id)'
@@ -312,23 +109,24 @@ class ActivateSerialAPI(APIView):
 
         try:
             with transaction.atomic():
+                # Lock the serial key for update
                 serial_key = SerialKey.objects.select_for_update().get(
                     serial_number=serial_number,
                     pin=pin,
-                    customer__isnull=True
+                    customer__isnull=True  # Only unactivated serials
                 )
 
                 customer = get_object_or_404(Customer, id=customer_id, is_active=True)
 
+                # Activate the serial
                 serial_key.customer = customer
                 serial_key.used_at = timezone.now()
                 serial_key.save()
 
-                if hasattr(customer, 'token_balance') and hasattr(serial_key, 'tokens_remaining'):
-                    # تحديث آمن يمنع سباق البيانات
-                    Customer.objects.filter(pk=customer.pk).update(
-                        token_balance=F('token_balance') + serial_key.tokens_remaining
-                    )
+                # Update customer token balance atomically
+                Customer.objects.filter(pk=customer.pk).update(
+                    token_balance=F('token_balance') + serial_key.tokens_remaining
+                )
 
             return Response({
                 'success': True,
@@ -336,7 +134,7 @@ class ActivateSerialAPI(APIView):
                 'serial': {
                     'number': serial_key.serial_number,
                     'package': serial_key.package.name if serial_key.package else '',
-                    'tokens_remaining': getattr(serial_key, 'tokens_remaining', 0),
+                    'tokens_remaining': serial_key.tokens_remaining,
                 }
             }, status=status.HTTP_200_OK)
 
@@ -349,7 +147,7 @@ class ActivateSerialAPI(APIView):
 
 class UseTokenAPI(APIView):
     """خصم التوكن عند التحميل"""
-
+    
     def post(self, request):
         serializer = SerialDownloadSerializer(data=request.data)
         if not serializer.is_valid():
@@ -371,11 +169,12 @@ class UseTokenAPI(APIView):
                     is_active=True
                 )
 
-                tokens_before = getattr(serial_key, 'tokens_remaining', 0)
+                tokens_before = serial_key.tokens_remaining
 
-                if hasattr(serial_key, 'use_tokens') and serial_key.use_tokens(1):
-                    tokens_after = getattr(serial_key, 'tokens_remaining', 0)
+                if serial_key.use_tokens(1):
+                    tokens_after = serial_key.tokens_remaining
 
+                    # Log the usage
                     SerialUsage.objects.create(
                         serial_key=serial_key,
                         customer=serial_key.customer,
@@ -404,7 +203,7 @@ class UseTokenAPI(APIView):
 
 class SerialUsageHistoryAPI(APIView):
     """عرض سجل استخدامات السيريال"""
-
+    
     def post(self, request):
         serializer = SerialVerifySerializer(data=request.data)
         if not serializer.is_valid():
@@ -418,8 +217,14 @@ class SerialUsageHistoryAPI(APIView):
         pin = serializer.validated_data['pin']
 
         try:
-            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin)
-            usages = SerialUsage.objects.filter(serial_key=serial_key).order_by('-created_at')
+            serial_key = SerialKey.objects.get(
+                serial_number=serial_number, 
+                pin=pin
+            )
+            usages = SerialUsage.objects.filter(
+                serial_key=serial_key
+            ).order_by('-created_at')
+            
             usage_serializer = SerialUsageSerializer(usages, many=True)
 
             return Response({
@@ -434,43 +239,117 @@ class SerialUsageHistoryAPI(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
 
-# ==================== دالة استخراج البريد الإلكتروني ====================
-
-def extract_email_from_payload(data, raw_body_str=""):
-    """البحث عن البريد الإلكتروني داخل البيانات المعالجة أو النص الخام"""
-    def _recursive_search(val):
-        if not val:
-            return ''
-        if isinstance(val, dict):
-            for key in ['email', 'customer_email', 'client_email', 'payer_email', 'user_email']:
-                v = val.get(key)
-                if v and isinstance(v, str) and '@' in v:
-                    return v.strip()
-            for v in val.values():
-                res = _recursive_search(v)
-                if res:
-                    return res
-        elif isinstance(val, list):
-            for item in val:
-                res = _recursive_search(item)
-                if res:
-                    return res
-        elif isinstance(val, str):
-            match = re.search(EMAIL_REGEX, val)
+def extract_email_from_payload(data: Any, raw_body_str: str = "") -> Optional[str]:
+    """
+    البحث عن البريد الإلكتروني داخل البيانات المعالجة أو النص الخام
+    
+    Args:
+        data: Parsed JSON data or any nested structure
+        raw_body_str: Raw request body as string
+    
+    Returns:
+        Extracted email string or empty string
+    """
+    email_keys = ['email', 'customer_email', 'client_email', 'payer_email', 'user_email']
+    
+    def _recursive_search(value: Any) -> Optional[str]:
+        if not value:
+            return None
+            
+        if isinstance(value, dict):
+            # Check known email keys first
+            for key in email_keys:
+                if key in value:
+                    val = value[key]
+                    if isinstance(val, str) and '@' in val:
+                        return val.strip()
+            
+            # Recursively search all values
+            for v in value.values():
+                result = _recursive_search(v)
+                if result:
+                    return result
+                    
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                result = _recursive_search(item)
+                if result:
+                    return result
+                    
+        elif isinstance(value, str):
+            match = EMAIL_REGEX.search(value)
             if match:
                 return match.group(0)
-        return ''
+                
+        return None
 
+    # Try to find email in parsed data
     email = _recursive_search(data)
     if email:
         return email
 
+    # Fallback to raw body string
     if raw_body_str:
-        match = re.search(EMAIL_REGEX, raw_body_str)
+        match = EMAIL_REGEX.search(raw_body_str)
         if match:
             return match.group(0)
 
-    return ''
+    return ""
+
+
+def get_chargily_customer_email(customer_id: str, mode: str, api_secret_key: str) -> Optional[str]:
+    """
+    Fetch customer email from Chargily API
+    
+    Args:
+        customer_id: Chargily customer ID
+        mode: 'test' or 'live'
+        api_secret_key: Chargily API secret key
+    
+    Returns:
+        Customer email or None
+    """
+    try:
+        api_base = CHARGILY_TEST_API if mode == 'test' else CHARGILY_LIVE_API
+        headers = {
+            "Authorization": f"Bearer {api_secret_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(
+            f"{api_base}/customers/{customer_id}",
+            headers=headers,
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            customer_data = response.json()
+            return customer_data.get('email')
+            
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch Chargily customer: {e}")
+    
+    return None
+
+
+def parse_metadata(metadata: Any) -> Dict:
+    """
+    Parse metadata from various formats to dictionary
+    
+    Args:
+        metadata: Raw metadata (dict, JSON string, or other)
+    
+    Returns:
+        Parsed metadata dictionary
+    """
+    if isinstance(metadata, dict):
+        return metadata
+    elif isinstance(metadata, str):
+        try:
+            return json.loads(metadata)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse metadata JSON")
+    return {}
 
 
 @csrf_exempt
@@ -479,78 +358,71 @@ def chargily_webhook(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    # 1. جلب المفاتيح
-    webhook_secret = getattr(settings, 'CHARGILY_APP_SECRET', '') or getattr(settings, 'CHARGILY_SECRET_KEY', '')
+    # 1. Verify webhook signature
+    webhook_secret = getattr(settings, 'CHARGILY_APP_SECRET', '') or \
+                     getattr(settings, 'CHARGILY_SECRET_KEY', '')
     api_secret_key = getattr(settings, 'CHARGILY_SECRET_KEY', '') or webhook_secret
 
     if not webhook_secret:
-        logger.error("Chargily webhook secret is not configured in settings.")
+        logger.error("Chargily webhook secret not configured")
         return JsonResponse({'error': 'Server configuration error'}, status=500)
 
+    # Verify HMAC signature
     secret_bytes = webhook_secret.encode('utf-8') if isinstance(webhook_secret, str) else webhook_secret
-    signature = request.headers.get('signature') or request.headers.get('Chargily-Signature') or ''
+    signature = request.headers.get('signature', '') or \
+                request.headers.get('Chargily-Signature', '')
 
-    # 2. التحقق من التوقيع
-    computed_signature = hmac.new(secret_bytes, request.body, hashlib.sha256).hexdigest()
+    computed_signature = hmac.new(
+        secret_bytes, 
+        request.body, 
+        hashlib.sha256
+    ).hexdigest()
 
     if not hmac.compare_digest(computed_signature, signature):
-        logger.warning("Invalid Chargily webhook signature received.")
+        logger.warning("Invalid webhook signature received")
         return JsonResponse({'error': 'Invalid signature'}, status=400)
 
-    # 3. استخراج البيانات
+    # 2. Parse request body
     raw_body_text = request.body.decode('utf-8', errors='ignore')
     try:
         payload = json.loads(raw_body_text)
     except json.JSONDecodeError:
+        logger.error("Invalid JSON in webhook payload")
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
+    # 3. Only process successful payments
     if payload.get('type') != 'checkout.paid':
         return JsonResponse({'status': 'ignored'}, status=200)
 
-    checkout_data = payload.get('data', {}) or {}
+    checkout_data = payload.get('data', {})
     checkout_id = checkout_data.get('id')
 
-    # منع التكرار (Idempotency Check)
+    # 4. Idempotency check
     if checkout_id and hasattr(SerialKey, 'payment_id'):
         if SerialKey.objects.filter(payment_id=checkout_id).exists():
+            logger.info(f"Duplicate webhook ignored: {checkout_id}")
             return JsonResponse({'status': 'already_processed'}, status=200)
 
-    # 4. استخراج البريد محلياً
+    # 5. Extract email
     client_email = extract_email_from_payload(checkout_data, raw_body_text)
 
-    # 5. طلب البريد من Chargily API في حال عدم وجوده
+    # 6. Fetch email from Chargily API if needed
     chargily_customer_id = checkout_data.get('customer_id')
     if not client_email and chargily_customer_id:
-        try:
-            mode = checkout_data.get('account', {}).get('mode', 'test')
-            api_base = "https://pay.chargily.net/test/api/v2" if mode == 'test' else "https://pay.chargily.net/api/v2"
+        mode = checkout_data.get('account', {}).get('mode', 'test')
+        client_email = get_chargily_customer_email(
+            chargily_customer_id, 
+            mode, 
+            api_secret_key
+        ) or ''
 
-            headers = {
-                "Authorization": f"Bearer {api_secret_key}",
-                "Content-Type": "application/json"
-            }
-            res = requests.get(f"{api_base}/customers/{chargily_customer_id}", headers=headers, timeout=3)
-            if res.status_code == 200:
-                cust_data = res.json()
-                client_email = cust_data.get('email') or ''
-        except Exception as api_err:
-            logger.error(f"Chargily API Customer Fetch Error: {api_err}")
+    # 7. Parse metadata
+    metadata = parse_metadata(checkout_data.get('metadata', {}))
+    client_name = metadata.get('name', '') or \
+                  metadata.get('client_name', '') or \
+                  'عميل SerialCo'
 
-    # 6. قراءة Metadata والاسم
-    raw_metadata = checkout_data.get('metadata') or {}
-    if isinstance(raw_metadata, str):
-        try:
-            metadata = json.loads(raw_metadata)
-        except json.JSONDecodeError:
-            metadata = {}
-    elif isinstance(raw_metadata, dict):
-        metadata = raw_metadata
-    else:
-        metadata = {}
-
-    client_name = metadata.get('name') or metadata.get('client_name') or 'عميل SerialCo'
-
-    # 7. جلب الباقة
+    # 8. Find or get package
     package_id = metadata.get('package_id')
     package_name = metadata.get('package_name')
     package = None
@@ -560,46 +432,56 @@ def chargily_webhook(request):
     if not package and package_name:
         package = SerialPackage.objects.filter(name=package_name).first()
     if not package:
-        package = SerialPackage.objects.first()
+        package = SerialPackage.objects.filter(is_active=True).first()
 
     if not package:
-        logger.error("No active SerialPackage found in DB.")
+        logger.error("No active package found for serial creation")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 8. ربط العميل المسجل إن وجد
+    # 9. Find existing customer
     customer_id = metadata.get('user_id') or metadata.get('customer_id')
     customer_instance = None
+    
     if customer_id:
         try:
-            customer_instance = Customer.objects.get(id=customer_id, is_active=True)
+            customer_instance = Customer.objects.get(
+                id=customer_id, 
+                is_active=True
+            )
             if not client_email and getattr(customer_instance, 'email', None):
                 client_email = customer_instance.email
         except Customer.DoesNotExist:
-            pass
+            logger.warning(f"Customer {customer_id} not found")
 
-    # 9. إنشاء السيريال داخل معاملة موحدة
+    # 10. Create serial key
     try:
         with transaction.atomic():
             create_kwargs = {
                 'package': package,
                 'customer': customer_instance,
-                'used_at': timezone.now() if customer_instance else None
+                'used_at': timezone.now() if customer_instance else None,
+                'is_active': True
             }
+            
             if hasattr(SerialKey, 'payment_id') and checkout_id:
                 create_kwargs['payment_id'] = checkout_id
 
             serial = SerialKey.objects.create(**create_kwargs)
 
+            # Add tokens to customer balance
             if customer_instance:
                 Customer.objects.filter(pk=customer_instance.pk).update(
                     token_balance=F('token_balance') + package.tokens_limit
                 )
+                logger.info(
+                    f"Added {package.tokens_limit} tokens to customer {customer_id}"
+                )
 
-    except Exception as create_err:
-        logger.error(f"Failed to create serial: {create_err}")
+    except Exception as e:
+        logger.error(f"Failed to create serial: {e}", exc_info=True)
         return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
-    # 10. إرسال البريد الإلكتروني (عزل الأخطاء لعدم تعطيل الـ Webhook)
+    # 11. Send email notification
     if client_email:
         try:
             send_mail(
@@ -612,28 +494,37 @@ def chargily_webhook(request):
                     f"البين: {serial.pin}\n\n"
                     f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
                 ),
-                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@serialcotv.com'),
+                from_email=getattr(
+                    settings, 
+                    'DEFAULT_FROM_EMAIL', 
+                    'noreply@serialcotv.com'
+                ),
                 recipient_list=[client_email],
                 fail_silently=True,
             )
-        except Exception as mail_err:
-            logger.error(f"Failed to send email to {client_email}: {mail_err}")
+            logger.info(f"Confirmation email sent to {client_email}")
+        except Exception as e:
+            logger.error(f"Failed to send email to {client_email}: {e}")
 
-    # 11. تحديث Google Sheet
+    # 12. Update Google Sheet
     sheet_url = getattr(settings, 'GOOGLE_SHEET_URL', '')
     if sheet_url:
         try:
-            requests.post(sheet_url, json={
-                'client': client_name,
-                'client_email': client_email,
-                'email': client_email,
-                'package': package.name,
-                'serial': str(serial.serial_number),
-                'pin': str(serial.pin),
-                'tokens': package.tokens_limit,
-            }, timeout=2)
-        except Exception as sheet_err:
-            logger.error(f"Google Sheet update error: {sheet_err}")
+            requests.post(
+                sheet_url,
+                json={
+                    'client': client_name,
+                    'client_email': client_email,
+                    'email': client_email,
+                    'package': package.name,
+                    'serial': str(serial.serial_number),
+                    'pin': str(serial.pin),
+                    'tokens': package.tokens_limit,
+                },
+                timeout=5
+            )
+        except requests.RequestException as e:
+            logger.error(f"Failed to update Google Sheet: {e}")
 
     return JsonResponse({
         'success': True,
