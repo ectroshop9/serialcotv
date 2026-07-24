@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from datetime import timedelta
-from decouple import config
+from decouple import config, Csv
 import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -9,20 +9,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-now')
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = [
-    '.onrender.com',
-    'localhost',
-    '127.0.0.1',
-    '.serialco.tv',
-    'www.serialco.tv',
-    '.cloudshell.dev',
-]
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', 
+    default='.onrender.com,localhost,127.0.0.1,.serialco.tv,www.serialco.tv,.cloudshell.dev',
+    cast=Csv()
+)
 
-CSRF_TRUSTED_ORIGINS = [
-    'https://*.cloudshell.dev',
-    'https://*.serialco.tv',
-    'https://*.onrender.com',
-]
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS',
+    default='https://*.cloudshell.dev,https://*.serialco.tv,https://*.onrender.com',
+    cast=Csv()
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -106,7 +101,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Django 4.2+ Modern Storages (بدون المتغيرات القديمة)
+# Django 4.2+ Modern Storages
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
@@ -121,16 +116,20 @@ CLOUDINARY_STORAGE = {
     'API_KEY': config('CLOUDINARY_API_KEY', default=''),
     'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
 }
+
 # ==================== CORS Configuration ====================
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [
-    "https://serialco.tv",
-    "https://www.serialco.tv",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://*.onrender.com",
-    "https://*.cloudshell.dev",
-]
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS',
+    default='https://serialco.tv,https://www.serialco.tv,http://localhost:3000,http://127.0.0.1:3000',
+    cast=Csv()
+)
+
+# إضافة نطاقات ديناميكية لـ Render و CloudShell
+if DEBUG:
+    CORS_ALLOWED_ORIGINS.extend([
+        "https://*.onrender.com",
+        "https://*.cloudshell.dev",
+    ])
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -164,7 +163,8 @@ REST_FRAMEWORK = {
     }
 }
 
-JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-32-char-jwt-secret-key-change-this')
+# ==================== Security Settings ====================
+JWT_SECRET_KEY = config('JWT_SECRET_KEY', default=SECRET_KEY)
 JWT_ALGORITHM = 'HS256'
 WALLET_CHARGE_SECRET = config('WALLET_CHARGE_SECRET', default='wallet-secret-key-123')
 
@@ -180,19 +180,68 @@ if not DEBUG:
     X_FRAME_OPTIONS = 'DENY'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# Email Settings
+# ==================== Email Settings ====================
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_TIMEOUT = 5
+EMAIL_TIMEOUT = 10  # زيادة timeout للـ email
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = 'SerialCo TV <noreply@serialco.tv>'
+
 # ==================== Chargily Payment Settings ====================
 CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='test_sk_BUiipcKlgliHR7gD7XSbSOFX2e7s39kK5R8apgTK')
 CHARGILY_PUBLIC_KEY = config('CHARGILY_PUBLIC_KEY', default='test_pk_RgoRHouTnkD7UIAK5xqmHhHUxUMYXbMA3uoTjELW')
-CHARGILY_APP_SECRET = config('CHARGILY_APP_SECRET', default=CHARGILY_SECRET_KEY)
+# ⚠️ مهم: استخدم مفتاح منفصل للـ Webhook
+CHARGILY_APP_SECRET = config('CHARGILY_APP_SECRET', default='')
 
 # ==================== Google Sheet Integration ====================
 GOOGLE_SHEET_URL = config('GOOGLE_SHEET_URL', default='')
+
+# ==================== Logging Configuration ====================
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{levelname}] {asctime} {module} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '[{levelname}] {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'logs' / 'django.log',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'serials': {  # للـ app الخاص بالسيريالات
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# إنشاء مجلد logs إذا لم يكن موجوداً
+LOGS_DIR = BASE_DIR / 'logs'
+LOGS_DIR.mkdir(exist_ok=True)
