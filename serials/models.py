@@ -35,10 +35,23 @@ class SerialKey(models.Model):
     is_used_up = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     used_at = models.DateTimeField(null=True, blank=True)
+    
+    # ✅✅✅ حقل ضروري لمنع تكرار الـ Webhook
+    payment_id = models.CharField(
+        max_length=255,
+        unique=True,  # منع التكرار على مستوى قاعدة البيانات
+        null=True,
+        blank=True,
+        db_index=True,  # فهرس للبحث السريع
+        verbose_name="Payment ID (Chargily)"
+    )
 
     class Meta:
         verbose_name = "Serial Key"
         verbose_name_plural = "Serial Keys"
+        indexes = [
+            models.Index(fields=['serial_number', 'pin']),  # فهرس مركب لتحسين أداء البحث
+        ]
 
     def __str__(self):
         return f"{self.serial_number} - {self.tokens_remaining} tokens left"
@@ -84,22 +97,35 @@ class SerialKey(models.Model):
 
 
 class SerialUsage(models.Model):
-    serial_key = models.ForeignKey(SerialKey, on_delete=models.CASCADE)
+    serial_key = models.ForeignKey(
+        SerialKey, 
+        on_delete=models.CASCADE,
+        related_name='usages'  # ✅ يسمح بـ serial_key.usages.all()
+    )
     customer = models.ForeignKey(
         'accounts.Customer',
         on_delete=models.CASCADE,
         null=True,
-        blank=True
+        blank=True,
+        related_name='serial_usages'  # ✅ يسمح بـ customer.serial_usages.all()
     )
     file_name = models.CharField(max_length=200)
-    file_type = models.CharField(max_length=20)
+    file_type = models.CharField(max_length=20, default='unknown')  # ✅ قيمة افتراضية
     tokens_before = models.IntegerField()
     tokens_after = models.IntegerField()
+    tokens_used = models.IntegerField(default=1)  # ✅ عدد التوكنز المستخدمة
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = "Serial Usage"
         verbose_name_plural = "Serial Usages"
+        ordering = ['-created_at']  # ✅ ترتيب افتراضي من الأحدث للأقدم
 
     def __str__(self):
         return f"{self.serial_key.serial_number} - {self.file_name}"
+
+    def save(self, *args, **kwargs):
+        # ✅ حساب عدد التوكنز المستخدمة تلقائياً
+        if not self.tokens_used:
+            self.tokens_used = self.tokens_before - self.tokens_after
+        super().save(*args, **kwargs)
