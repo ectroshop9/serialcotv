@@ -1,3 +1,4 @@
+
 import os
 from pathlib import Path
 from datetime import timedelta
@@ -101,7 +102,6 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Django 4.2+ Modern Storages
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
@@ -124,7 +124,6 @@ CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS',
     cast=Csv()
 )
 
-# إضافة نطاقات ديناميكية لـ Render و CloudShell
 if DEBUG:
     CORS_ALLOWED_ORIGINS.extend([
         "https://*.onrender.com",
@@ -185,15 +184,14 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_TIMEOUT = 10  # زيادة timeout للـ email
+EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = 'SerialCo TV <noreply@serialco.tv>'
 
 # ==================== Chargily Payment Settings ====================
-CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='test_sk_BUiipcKlgliHR7gD7XSbSOFX2e7s39kK5R8apgTK')
-CHARGILY_PUBLIC_KEY = config('CHARGILY_PUBLIC_KEY', default='test_pk_RgoRHouTnkD7UIAK5xqmHhHUxUMYXbMA3uoTjELW')
-# ⚠️ مهم: استخدم مفتاح منفصل للـ Webhook
+CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='')
+CHARGILY_PUBLIC_KEY = config('CHARGILY_PUBLIC_KEY', default='')
 CHARGILY_APP_SECRET = config('CHARGILY_APP_SECRET', default='')
 
 # ==================== Google Sheet Integration ====================
@@ -208,19 +206,10 @@ LOGGING = {
             'format': '[{levelname}] {asctime} {module} {message}',
             'style': '{',
         },
-        'simple': {
-            'format': '[{levelname}] {message}',
-            'style': '{',
-        },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
-        },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
             'formatter': 'verbose',
         },
     },
@@ -230,18 +219,14 @@ LOGGING = {
     },
     'loggers': {
         'django': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
-        'serials': {  # للـ app الخاص بالسيريالات
-            'handlers': ['console', 'file'],
+        'serials': {
+            'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
     },
 }
-
-# إنشاء مجلد logs إذا لم يكن موجوداً
-LOGS_DIR = BASE_DIR / 'logs'
-LOGS_DIR.mkdir(exist_ok=True)
