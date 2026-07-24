@@ -228,11 +228,12 @@ class SerialUsageHistoryAPI(APIView):
                 'message': 'بيانات السيريال غير صحيحة'
             }, status=status.HTTP_404_NOT_FOUND)
 
+
 # ==================== Chargily Webhook ====================
 
 @csrf_exempt
 def chargily_webhook(request):
-    """استقبال Webhook من Chargily بعد الدفع الناجح مع فحص توقيع مرن وآمن"""
+    """استقبال Webhook من Chargily بعد الدفع الناجح مع فحص توقيع مرن واستخراج آمن للبريد"""
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
@@ -254,14 +255,8 @@ def chargily_webhook(request):
         hashlib.sha256
     ).hexdigest()
 
-    # 3. التحقق من التوقيع
+    # 3. التحقق من التوقيع (مرن في DEBUG، صارم في Production)
     if not hmac.compare_digest(computed_signature, signature):
-        print("⚠️ [Signature Warning]")
-        print(f" - Secret used: '{raw_secret[:5]}...' (Length: {len(raw_secret)})")
-        print(f" - Computed Signature: {computed_signature}")
-        print(f" - Received Signature: {signature}")
-
-        # في بيئة التطوير المحلي (DEBUG = True)، نسمح بمرور الطلب للتجربة بدون تعطيل
         if getattr(settings, 'DEBUG', False):
             print("⚠️ [DEBUG MODE]: تم تجاوز خطأ التوقيع للتجربة المحلية فقط.")
         else:
@@ -279,9 +274,19 @@ def chargily_webhook(request):
         return JsonResponse({'status': 'ignored'}, status=200)
 
     checkout_data = payload.get('data', {}) or {}
-    metadata = checkout_data.get('metadata') or {}
+    checkout_id = checkout_data.get('id')  # رقم العملية الفريد من Chargily
 
-    customer_id = metadata.get('user_id')
+    # 🛑 أمان: فك تشفير metadata بأمان سواء كانت Dict أو String
+    raw_metadata = checkout_data.get('metadata') or {}
+    if isinstance(raw_metadata, str):
+        try:
+            metadata = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    else:
+        metadata = raw_metadata
+
+    customer_id = metadata.get('user_id') or metadata.get('customer_id')
     package_name = metadata.get('package_name', '')
     package_id = metadata.get('package_id')
 
@@ -300,47 +305,61 @@ def chargily_webhook(request):
         print("❌ الباقة المطلوبة غير موجودة")
         return JsonResponse({'error': 'Package not found'}, status=404)
 
-    # 6. إنشاء السيريال
-    try:
-        serial = SerialKey.objects.create(package=package)
-        print(f"✅ تم إنشاء السيريال بنجاح: {serial.serial_number}")
-    except Exception as create_err:
-        print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
-        return JsonResponse({'error': 'Failed to create serial'}, status=500)
-
-    # 7. استخراج البريد والاسم
+    # 6. البحث الشامل عن البريد الإلكتروني والاسم (حل المشكلة الرئيسي)
     customer_obj = checkout_data.get('customer') if isinstance(checkout_data.get('customer'), dict) else {}
+    payer_obj = checkout_data.get('payer') if isinstance(checkout_data.get('payer'), dict) else {}
 
     client_email = (
-        checkout_data.get('customer_email') or 
         metadata.get('email') or 
         metadata.get('client_email') or 
+        metadata.get('user_email') or 
+        checkout_data.get('customer_email') or 
+        checkout_data.get('payer_email') or 
         customer_obj.get('email') or 
+        payer_obj.get('email') or 
         ''
     )
 
     client_name = (
-        checkout_data.get('customer_name') or 
         metadata.get('name') or 
+        metadata.get('client_name') or 
+        checkout_data.get('customer_name') or 
         customer_obj.get('name') or 
+        payer_obj.get('name') or 
         'عميل SerialCo'
     )
 
-    # 8. ربط السيريال بالحساب الداخلي إن وجد
+    # 7. ربط الحساب الداخلي بالعميل + جلب البريد منه إن لم يجد في Chargily
+    customer_instance = None
     if customer_id:
         try:
-            customer = Customer.objects.get(id=customer_id, is_active=True)
-            serial.customer = customer
-            serial.used_at = timezone.now()
-            serial.save()
-
-            customer.token_balance += package.tokens_limit
-            customer.save()
-
-            if not client_email and hasattr(customer, 'email'):
-                client_email = customer.email
+            customer_instance = Customer.objects.get(id=customer_id, is_active=True)
+            if not client_email and getattr(customer_instance, 'email', None):
+                client_email = customer_instance.email
         except Customer.DoesNotExist:
             pass
+
+    # 🛑 تجربة محليّة: وضع إيميل تجريبي أثناء DEBUG إذا كان الإيميل فارغاً
+    if not client_email and getattr(settings, 'DEBUG', False):
+        client_email = getattr(settings, 'DEFAULT_TEST_EMAIL', 'test_user@gmail.com')
+        print(f"⚠️ [DEBUG MODE]: تم تعيين إيميل افتراضي للتجربة: {client_email}")
+
+    # 8. إنشاء السيريال
+    try:
+        serial = SerialKey.objects.create(
+            package=package,
+            customer=customer_instance,
+            used_at=timezone.now() if customer_instance else None
+        )
+
+        if customer_instance:
+            customer_instance.token_balance += package.tokens_limit
+            customer_instance.save()
+
+        print(f"✅ تم إنشاء السيريال بنجاح: {serial.serial_number}")
+    except Exception as create_err:
+        print(f"❌ خطأ أثناء إنشاء السيريال: {create_err}")
+        return JsonResponse({'error': 'Failed to create serial'}, status=500)
 
     # 9. إرسال البريد الإلكتروني
     if client_email:
@@ -361,24 +380,26 @@ def chargily_webhook(request):
             )
             print(f"📧 تم إرسال البريد إلى: {client_email}")
         except Exception as mail_err:
-            print(f"❌ خطأ في إرسال البريد (تأكد من SMTP): {mail_err}")
+            print(f"❌ خطأ في إرسال البريد (تأكد من إعدادات SMTP في settings.py): {mail_err}")
     else:
-        print("⚠️ لم يتم إرسال إيميل لأن خانة البريد فارغة.")
+        print("⚠️ لم يتم إرسال إيميل لأن البريد الإلكتروني فارغ تماماً.")
 
     # 10. تحديث Google Sheet
-    try:
-        requests.post(GOOGLE_SHEET_URL, json={
-            'client': client_name,
-            'client_email': client_email,
-            'email': client_email,
-            'package': package.name,
-            'serial': str(serial.serial_number),
-            'pin': str(serial.pin),
-            'tokens': package.tokens_limit,
-        }, timeout=4)
-        print("📊 تم تحديث Google Sheet")
-    except Exception as sheet_err:
-        print(f"❌ خطأ Google Sheet: {sheet_err}")
+    sheet_url = getattr(settings, 'GOOGLE_SHEET_URL', globals().get('GOOGLE_SHEET_URL', ''))
+    if sheet_url:
+        try:
+            requests.post(sheet_url, json={
+                'client': client_name,
+                'client_email': client_email,
+                'email': client_email,
+                'package': package.name,
+                'serial': str(serial.serial_number),
+                'pin': str(serial.pin),
+                'tokens': package.tokens_limit,
+            }, timeout=4)
+            print(f"📊 تم تحديث Google Sheet للإيميل: {client_email}")
+        except Exception as sheet_err:
+            print(f"❌ خطأ Google Sheet: {sheet_err}")
 
     return JsonResponse({
         'success': True,
