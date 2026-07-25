@@ -118,7 +118,7 @@ def async_post_processing(client_email, client_name, package_id, serial_id, cust
             except Customer.DoesNotExist:
                 pass
         
-                if client_email:
+        if client_email:
             try:
                 logger.info(f"📧 [Async] Sending email to {client_email}")
                 
@@ -127,7 +127,6 @@ def async_post_processing(client_email, client_name, package_id, serial_id, cust
                 else:
                     email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>التوكنز: {package.tokens_limit}</p>"
                 
-                # Brevo API (HTTP)
                 api_key = settings.EMAIL_HOST_PASSWORD
                 response = requests.post(
                     "https://api.brevo.com/v3/smtp/email",
