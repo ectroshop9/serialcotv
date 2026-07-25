@@ -188,25 +188,27 @@ def async_post_processing(
         
         # إرسال البريد الإلكتروني
         if client_email:
-    try:
-        import resend
-        resend.api_key = settings.EMAIL_HOST_PASSWORD
-        
-        logger.info(f"📧 [Async] Sending email to {client_email}")
-        
-        if customer_instance:
-            email_html = f"<p>مرحباً {client_name}،</p><p>تم تفعيل اشتراكك بنجاح وربطه بحسابك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>رابط: https://serialcotv.vercel.app/dashboard</p>"
-        else:
-            email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>سجل من: https://serialcotv.vercel.app/register</p>"
-        
-        resend.Emails.send({
-            "from": "SerialCo TV <noreply@serialcotv.com>",
-            "to": [client_email],
-            "subject": "تم تفعيل اشتراكك بنجاح 🎉",
-            "html": email_html,
-        })
-        logger.info(f"✅ [Async] Email sent via Resend API")
-        
+            try:
+                import resend
+                resend.api_key = settings.EMAIL_HOST_PASSWORD
+                
+                logger.info(f"📧 [Async] Sending email to {client_email}")
+                
+                if customer_instance:
+                    email_html = f"<p>مرحباً {client_name}،</p><p>تم تفعيل اشتراكك بنجاح وربطه بحسابك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>رابط: https://serialcotv.vercel.app/dashboard</p>"
+                else:
+                    email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>سجل من: https://serialcotv.vercel.app/register</p>"
+                
+                resend.Emails.send({
+                    "from": "SerialCo TV <noreply@serialcotv.com>",
+                    "to": [client_email],
+                    "subject": "تم تفعيل اشتراكك بنجاح 🎉",
+                    "html": email_html,
+                })
+                logger.info(f"✅ [Async] Email sent via Resend API")
+                
+            except Exception as e:
+                logger.error(f"❌ [Async] Email FAILED: {e}")
     except Exception as e:
         logger.error(f"❌ [Async] Email FAILED: {e}")        
         # تحديث Google Sheet
