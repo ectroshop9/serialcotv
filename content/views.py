@@ -3,10 +3,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from django.http import FileResponse, HttpResponse, HttpResponseRedirect
-from django.utils import timezone
+from django.http import HttpResponse, HttpResponseRedirect
 from .models import TVBrand, TVModel, Firmware, Schematic, DownloadToken
-from accounts.models import Customer
+from serials.models import SerialKey
 
 
 class BrandListAPI(APIView):
@@ -48,13 +47,33 @@ class FirmwareListAPI(APIView):
                 Q(model__brand__name__icontains=search) |
                 Q(version__icontains=search)
             )
-        data = firmwares.values('id', 'model__brand__name', 'model__model_number', 'version', 'description', 'downloads_count', 'created_at')
+        data = firmwares.values('id', 'model__brand__name', 'model__model_number', 'version', 'token_cost', 'description', 'downloads_count', 'created_at')
         return Response({'success': True, 'firmwares': list(data)})
 
 
 class FirmwareDetailAPI(APIView):
     def get(self, request, pk):
         firmware = get_object_or_404(Firmware, pk=pk, is_active=True)
+        
+        # التحقق من السيريال
+        serial_number = request.query_params.get('serial_number')
+        pin = request.query_params.get('pin')
+        
+        if not serial_number or not pin:
+            return Response({'success': False, 'message': 'يرجى إدخال السيريال والبين'}, status=400)
+        
+        try:
+            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin, is_active=True)
+        except SerialKey.DoesNotExist:
+            return Response({'success': False, 'message': 'السيريال غير صحيح'}, status=404)
+        
+        if serial_key.tokens_remaining < firmware.token_cost:
+            return Response({'success': False, 'message': 'رصيد التوكن غير كافي'}, status=400)
+        
+        # خصم التوكن
+        serial_key.use_tokens(firmware.token_cost)
+        firmware.downloads_count += 1
+        firmware.save()
         
         # تحديد الرابط الحقيقي
         if firmware.file:
@@ -66,20 +85,18 @@ class FirmwareDetailAPI(APIView):
         else:
             return Response({'success': False, 'message': 'لا يوجد ملف'}, status=404)
         
+        # إنشاء توكن تحميل مؤقت
         file_name = f"{firmware.model.model_number}_v{firmware.version}.bin"
-        
-        # إنشاء توكن تحميل مؤقت (15 دقيقة)
-        download_token = DownloadToken.generate(real_url, file_name)
+        download_token = DownloadToken.generate(real_url, file_name, serial_key.customer)
         
         return Response({
             'success': True,
+            'tokens_remaining': serial_key.tokens_remaining,
+            'download_url': f"/api/download/{download_token.token}/",
             'firmware': {
                 'id': firmware.id,
                 'model': f"{firmware.model.brand.name} - {firmware.model.model_number}",
                 'version': firmware.version,
-                'download_url': f"/api/download/{download_token.token}/",
-                'description': firmware.description,
-                'downloads_count': firmware.downloads_count,
             }
         })
 
@@ -100,7 +117,7 @@ class SchematicListAPI(APIView):
                 Q(model__model_number__icontains=search) |
                 Q(model__brand__name__icontains=search)
             )
-        data = schematics.values('id', 'model__brand__name', 'model__model_number', 'schematic_type', 'title', 'description', 'downloads_count', 'created_at')
+        data = schematics.values('id', 'model__brand__name', 'model__model_number', 'schematic_type', 'title', 'token_cost', 'description', 'downloads_count', 'created_at')
         return Response({'success': True, 'schematics': list(data)})
 
 
@@ -108,6 +125,27 @@ class SchematicDetailAPI(APIView):
     def get(self, request, pk):
         schematic = get_object_or_404(Schematic, pk=pk, is_active=True)
         
+        # التحقق من السيريال
+        serial_number = request.query_params.get('serial_number')
+        pin = request.query_params.get('pin')
+        
+        if not serial_number or not pin:
+            return Response({'success': False, 'message': 'يرجى إدخال السيريال والبين'}, status=400)
+        
+        try:
+            serial_key = SerialKey.objects.get(serial_number=serial_number, pin=pin, is_active=True)
+        except SerialKey.DoesNotExist:
+            return Response({'success': False, 'message': 'السيريال غير صحيح'}, status=404)
+        
+        if serial_key.tokens_remaining < schematic.token_cost:
+            return Response({'success': False, 'message': 'رصيد التوكن غير كافي'}, status=400)
+        
+        # خصم التوكن
+        serial_key.use_tokens(schematic.token_cost)
+        schematic.downloads_count += 1
+        schematic.save()
+        
+        # تحديد الرابط الحقيقي
         if schematic.file:
             real_url = request.build_absolute_uri(schematic.file.url)
         elif schematic.file_url:
@@ -117,19 +155,18 @@ class SchematicDetailAPI(APIView):
         else:
             return Response({'success': False, 'message': 'لا يوجد ملف'}, status=404)
         
+        # إنشاء توكن تحميل مؤقت
         file_name = f"{schematic.model.model_number}_{schematic.title}.pdf"
-        download_token = DownloadToken.generate(real_url, file_name)
+        download_token = DownloadToken.generate(real_url, file_name, serial_key.customer)
         
         return Response({
             'success': True,
+            'tokens_remaining': serial_key.tokens_remaining,
+            'download_url': f"/api/download/{download_token.token}/",
             'schematic': {
                 'id': schematic.id,
                 'model': f"{schematic.model.brand.name} - {schematic.model.model_number}",
-                'type': schematic.get_schematic_type_display(),
                 'title': schematic.title,
-                'download_url': f"/api/download/{download_token.token}/",
-                'description': schematic.description,
-                'downloads_count': schematic.downloads_count,
             }
         })
 
