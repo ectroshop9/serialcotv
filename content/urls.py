@@ -15,4 +15,7 @@ urlpatterns = [
     # Schematics
     path('schematics/', views.SchematicListAPI.as_view(), name='schematics-list'),
     path('schematics/<int:pk>/', views.SchematicDetailAPI.as_view(), name='schematics-detail'),
+    
+    # Download (محمي بتوكن)
+    path('download/<str:token>/', views.DownloadFileAPI.as_view(), name='download-file'),
 ]

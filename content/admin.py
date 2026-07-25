@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TVBrand, TVModel, Firmware, Schematic
+from .models import TVBrand, TVModel, Firmware, Schematic, DownloadToken  # ← أضف DownloadToken
 
 @admin.register(TVBrand)
 class TVBrandAdmin(admin.ModelAdmin):
@@ -25,7 +25,13 @@ class SchematicAdmin(admin.ModelAdmin):
     list_filter = ('schematic_type', 'is_active', 'model__brand')
     search_fields = ('title', 'model__model_number', 'model__brand__name')
 
-# ⭐ تخصيص لوحة التحكم
+@admin.register(DownloadToken)
+class DownloadTokenAdmin(admin.ModelAdmin):
+    list_display = ('token', 'file_name', 'customer', 'used', 'created_at', 'expires_at')
+    list_filter = ('used',)
+    search_fields = ('token', 'file_name', 'customer__email')
+    readonly_fields = ('token', 'created_at', 'expires_at')
+
 admin.site.site_header = 'SerialCo TV Admin'
 admin.site.site_title = 'SerialCo TV'
 admin.site.index_title = 'Dashboard'

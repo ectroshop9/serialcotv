@@ -2,6 +2,10 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from accounts.models import Notification
+import secrets
+from datetime import timedelta
+from django.utils import timezone
+
 
 class TVBrand(models.Model):
     name = models.CharField(max_length=100)
@@ -84,6 +88,33 @@ class Schematic(models.Model):
     
     def __str__(self):
         return f"{self.model} - {self.title} ({self.token_cost} tokens)"
+
+
+class DownloadToken(models.Model):
+    token = models.CharField(max_length=64, unique=True)
+    file_url = models.URLField(max_length=500)
+    file_name = models.CharField(max_length=200)
+    customer = models.ForeignKey('accounts.Customer', on_delete=models.CASCADE, null=True, blank=True)
+    used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    
+    def is_valid(self):
+        return not self.used and self.expires_at > timezone.now()
+    
+    @staticmethod
+    def generate(file_url, file_name, customer=None):
+        token = secrets.token_urlsafe(32)
+        return DownloadToken.objects.create(
+            token=token,
+            file_url=file_url,
+            file_name=file_name,
+            customer=customer,
+            expires_at=timezone.now() + timedelta(minutes=15)
+        )
+    
+    def __str__(self):
+        return f"{self.file_name} - {'Used' if self.used else 'Valid'}"
 
 
 # ==================== Signals ====================
