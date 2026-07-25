@@ -127,12 +127,14 @@ def async_post_processing(client_email, client_name, package_id, serial_id, cust
                 else:
                     email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>التوكنز: {package.tokens_limit}</p>"
                 
-                api_key = settings.EMAIL_HOST_PASSWORD
+                # ✅ استخدام BREVO_API_KEY
+                api_key = getattr(settings, 'BREVO_API_KEY', settings.EMAIL_HOST_PASSWORD)
                 response = requests.post(
                     "https://api.brevo.com/v3/smtp/email",
                     headers={
                         "api-key": api_key,
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "accept": "application/json"
                     },
                     json={
                         "sender": {"name": "SerialCo TV", "email": "ectroshop9@gmail.com"},
