@@ -195,7 +195,6 @@ def async_post_processing(
                 logger.info(f"📧 [Async] Sending email to {client_email}")
                 
                 if customer_instance:
-                if customer_instance:
                     email_html = f"""
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f1f5f9; border-radius: 14px; overflow: hidden;">
                         <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px 20px; text-align: center;">
