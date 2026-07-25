@@ -251,7 +251,7 @@ def async_post_processing(
                     """
                 
                 resend.Emails.send({
-                    "from": "SerialCo TV <onboarding@resend.dev>",
+                    "from": "SerialCo TV <ectroshop9@gmail.com>",
                     "to": [client_email],
                     "subject": "تم تفعيل اشتراكك بنجاح 🎉",
                     "html": email_html,
