@@ -200,7 +200,7 @@ def async_post_processing(
                     email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>سجل من: https://serialcotv.vercel.app/register</p>"
                 
                 resend.Emails.send({
-                    "from": "SerialCo TV <noreply@serialcotv.com>",
+                    "from": "SerialCo TV <onboarding@resend.dev>",
                     "to": [client_email],
                     "subject": "تم تفعيل اشتراكك بنجاح 🎉",
                     "html": email_html,
