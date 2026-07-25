@@ -187,76 +187,26 @@ def async_post_processing(
                 pass
         
         # إرسال البريد الإلكتروني
-        if client_email:
+               if client_email:
             try:
-                import resend
-                resend.api_key = settings.EMAIL_HOST_PASSWORD
-                
                 logger.info(f"📧 [Async] Sending email to {client_email}")
                 
                 if customer_instance:
-                    email_html = f"""
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f1f5f9; border-radius: 14px; overflow: hidden;">
-                        <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px 20px; text-align: center;">
-                            <h1 style="font-size: 22px; font-weight: 900; margin: 0; letter-spacing: 2px;">SERIALCO<span style="color: #f59e0b;">TV</span></h1>
-                            <p style="font-size: 14px; margin: 8px 0 0 0; opacity: 0.9;">🎉 مبروك {client_name}!</p>
-                        </div>
-                        <div style="padding: 24px;">
-                            <p style="font-size: 14px; text-align: center; margin-bottom: 20px;">تم تفعيل اشتراكك بنجاح وربطه بحسابك!</p>
-                            <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                                <h3 style="color: #f59e0b; font-size: 14px; margin: 0 0 16px 0;">📦 بيانات الاشتراك</h3>
-                                <table style="width: 100%; font-size: 13px;">
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">الباقة</td><td style="padding: 8px 0; font-weight: bold;">{package.name}</td></tr>
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">السيريال</td><td style="padding: 8px 0;"><code style="background: #0f172a; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: #6366f1;">{serial.serial_number}</code></td></tr>
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">البين</td><td style="padding: 8px 0;"><code style="background: #0f172a; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: #6366f1;">{serial.pin}</code></td></tr>
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">التوكنز</td><td style="padding: 8px 0; font-weight: bold; color: #f59e0b;">{package.tokens_limit}</td></tr>
-                                </table>
-                            </div>
-                            <a href="https://serialcotv.vercel.app/dashboard" style="display: block; background: #6366f1; color: #fff; text-align: center; padding: 14px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: bold;">🚀 الذهاب إلى Dashboard</a>
-                        </div>
-                        <div style="background: #1e293b; padding: 16px; text-align: center; border-top: 1px solid #334155;">
-                            <p style="font-size: 11px; color: #64748b; margin: 0;">© 2026 SerialcoTV. جميع الحقوق محفوظة.</p>
-                        </div>
-                    </div>
-                    """
+                    email_message = f"مرحباً {client_name}\n\nتم تفعيل اشتراكك!\n\nالباقة: {package.name}\nالسيريال: {serial.serial_number}\nالبين: {serial.pin}\nالتوكنز: {package.tokens_limit}\n\nرابط: https://serialcotv.vercel.app/dashboard"
                 else:
-                    email_html = f"""
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f1f5f9; border-radius: 14px; overflow: hidden;">
-                        <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px 20px; text-align: center;">
-                            <h1 style="font-size: 22px; font-weight: 900; margin: 0; letter-spacing: 2px;">SERIALCO<span style="color: #f59e0b;">TV</span></h1>
-                            <p style="font-size: 14px; margin: 8px 0 0 0; opacity: 0.9;">🎉 شكراً لاشتراكك {client_name}!</p>
-                        </div>
-                        <div style="padding: 24px;">
-                            <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                                <h3 style="color: #f59e0b; font-size: 14px; margin: 0 0 16px 0;">📦 بيانات السيريال</h3>
-                                <table style="width: 100%; font-size: 13px;">
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">الباقة</td><td style="padding: 8px 0; font-weight: bold;">{package.name}</td></tr>
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">السيريال</td><td style="padding: 8px 0;"><code style="background: #0f172a; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: #6366f1;">{serial.serial_number}</code></td></tr>
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">البين</td><td style="padding: 8px 0;"><code style="background: #0f172a; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: #6366f1;">{serial.pin}</code></td></tr>
-                                    <tr><td style="padding: 8px 0; color: #94a3b8;">التوكنز</td><td style="padding: 8px 0; font-weight: bold; color: #f59e0b;">{package.tokens_limit}</td></tr>
-                                </table>
-                            </div>
-                            <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                                <h3 style="color: #f59e0b; font-size: 14px; margin: 0 0 12px 0;">📝 للاستفادة من اشتراكك</h3>
-                                <p style="font-size: 13px; margin: 0 0 8px 0;">1. سجل حساب جديد من الرابط أدناه</p>
-                                <p style="font-size: 13px; margin: 0;">2. فعّل السيريال من Dashboard</p>
-                            </div>
-                            <a href="https://serialcotv.vercel.app/register" style="display: block; background: #6366f1; color: #fff; text-align: center; padding: 14px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: bold; margin-bottom: 8px;">📝 تسجيل حساب جديد</a>
-                            <a href="https://serialcotv.vercel.app/dashboard" style="display: block; background: #f59e0b; color: #0f172a; text-align: center; padding: 14px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: bold;">🔑 تفعيل السيريال</a>
-                        </div>
-                        <div style="background: #1e293b; padding: 16px; text-align: center; border-top: 1px solid #334155;">
-                            <p style="font-size: 11px; color: #64748b; margin: 0;">© 2026 SerialcoTV. جميع الحقوق محفوظة.</p>
-                        </div>
-                    </div>
-                    """
+                    email_message = f"مرحباً {client_name}\n\nشكراً لاشتراكك!\n\nالباقة: {package.name}\nالسيريال: {serial.serial_number}\nالبين: {serial.pin}\nالتوكنز: {package.tokens_limit}\n\nسجل من: https://serialcotv.vercel.app/register"
                 
-                resend.Emails.send({
-                    "from": "SerialCo TV <ectroshop9@gmail.com>",
-                    "to": [client_email],
-                    "subject": "تم تفعيل اشتراكك بنجاح 🎉",
-                    "html": email_html,
-                })
-                logger.info(f"✅ [Async] Email sent via Resend API")
+                sent = send_mail(
+                    'SerialCo TV 🎉',
+                    email_message,
+                    settings.EMAIL_HOST_USER,
+                    [client_email],
+                    fail_silently=False,
+                )
+                logger.info(f"📧 [Async] Sent: {sent}")
+                
+            except Exception as e:
+                logger.error(f"❌ [Async] Email FAILED: {e}")
                 
             except Exception as e:
                 logger.error(f"❌ [Async] Email FAILED: {e}")
