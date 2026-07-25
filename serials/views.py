@@ -186,50 +186,51 @@ def async_post_processing(
             except Customer.DoesNotExist:
                 pass
         
-   # إرسال البريد الإلكتروني
-if client_email:
-    try:
-        logger.info(f"📧 [Async] Sending email to {client_email}")
+        # إرسال البريد الإلكتروني
+        if client_email:
+            try:
+                logger.info(f"📧 [Async] Sending email to {client_email}")
+                
+                if customer_instance:
+                    email_message = (
+                        f"مرحباً {client_name}،\n\n"
+                        f"تم تفعيل اشتراكك بنجاح وربطه بحسابك!\n\n"
+                        f"الباقة: {package.name}\n"
+                        f"السيريال: {serial.serial_number}\n"
+                        f"البين: {serial.pin}\n"
+                        f"عدد التوكنز: {package.tokens_limit}\n\n"
+                        f"رابط Dashboard: https://serialcotv.vercel.app/dashboard\n\n"
+                        f"يمكنك استخدام السيريال مباشرة من حسابك."
+                    )
+                else:
+                    email_message = (
+                        f"مرحباً {client_name}،\n\n"
+                        f"شكراً لاشتراكك! هذه بيانات السيريال الخاص بك:\n\n"
+                        f"الباقة: {package.name}\n"
+                        f"السيريال: {serial.serial_number}\n"
+                        f"البين: {serial.pin}\n"
+                        f"عدد التوكنز: {package.tokens_limit}\n\n"
+                        f"للاستفادة من اشتراكك:\n"
+                        f"1. سجل حساب جديد من هنا: https://serialcotv.vercel.app/register\n"
+                        f"2. فعّل السيريال من Dashboard\n\n"
+                        f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
+                    )
+                
+                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or settings.EMAIL_HOST_USER
+                logger.info(f"📧 [Async] From: {from_email}")
+                
+                sent = send_mail(
+                    subject='SerialCo TV - تم تفعيل اشتراكك بنجاح 🎉',
+                    message=email_message,
+                    from_email=from_email,
+                    recipient_list=[client_email],
+                    fail_silently=False,
+                )
+                logger.info(f"📧 [Async] Sent count: {sent}")
+                
+            except Exception as e:
+                logger.error(f"❌ [Async] Email sending FAILED: {type(e).__name__}: {e}")
         
-        if customer_instance:
-            email_message = (
-                f"مرحباً {client_name}،\n\n"
-                f"تم تفعيل اشتراكك بنجاح وربطه بحسابك!\n\n"
-                f"الباقة: {package.name}\n"
-                f"السيريال: {serial.serial_number}\n"
-                f"البين: {serial.pin}\n"
-                f"عدد التوكنز: {package.tokens_limit}\n\n"
-                f"رابط Dashboard: https://serialcotv.vercel.app/dashboard\n\n"
-                f"يمكنك استخدام السيريال مباشرة من حسابك."
-            )
-        else:
-            email_message = (
-                f"مرحباً {client_name}،\n\n"
-                f"شكراً لاشتراكك! هذه بيانات السيريال الخاص بك:\n\n"
-                f"الباقة: {package.name}\n"
-                f"السيريال: {serial.serial_number}\n"
-                f"البين: {serial.pin}\n"
-                f"عدد التوكنز: {package.tokens_limit}\n\n"
-                f"للاستفادة من اشتراكك:\n"
-                f"1. سجل حساب جديد من هنا: https://serialcotv.vercel.app/register\n"
-                f"2. فعّل السيريال من Dashboard\n\n"
-                f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
-            )
-        
-        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or settings.EMAIL_HOST_USER
-        logger.info(f"📧 [Async] From: {from_email}")
-        
-        sent = send_mail(
-            subject='SerialCo TV - تم تفعيل اشتراكك بنجاح 🎉',
-            message=email_message,
-            from_email=from_email,
-            recipient_list=[client_email],
-            fail_silently=False,
-        )
-        logger.info(f"📧 [Async] Sent count: {sent}")
-        
-    except Exception as e:
-        logger.error(f"❌ [Async] FAILED: {type(e).__name__}: {e}")
         # تحديث Google Sheet
         if sheet_url:
             try:
