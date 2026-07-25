@@ -127,24 +127,15 @@ def async_post_processing(client_email, client_name, package_id, serial_id, cust
                 else:
                     email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>التوكنز: {package.tokens_limit}</p>"
                 
-                # ✅ استخدام BREVO_API_KEY
-                api_key = getattr(settings, 'BREVO_API_KEY', settings.EMAIL_HOST_PASSWORD)
-                response = requests.post(
-                    "https://api.brevo.com/v3/smtp/email",
-                    headers={
-                        "api-key": api_key,
-                        "Content-Type": "application/json",
-                        "accept": "application/json"
-                    },
-                    json={
-                        "sender": {"name": "SerialCo TV", "email": "ectroshop9@gmail.com"},
-                        "to": [{"email": client_email}],
-                        "subject": "تم تفعيل اشتراكك بنجاح 🎉",
-                        "htmlContent": email_html,
-                    },
-                    timeout=10
+                send_mail(
+                    subject="تم تفعيل اشتراكك بنجاح 🎉",
+                    message="",
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[client_email],
+                    html_message=email_html,
+                    fail_silently=False,
                 )
-                logger.info(f"📧 [Async] Brevo API response: {response.status_code}")
+                logger.info(f"✅ [Async] Email sent via Django SMTP")
                 
             except Exception as e:
                 logger.error(f"❌ [Async] Email FAILED: {e}")
