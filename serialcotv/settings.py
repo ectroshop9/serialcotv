@@ -179,15 +179,16 @@ if not DEBUG:
     X_FRAME_OPTIONS = 'DENY'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# ==================== Email Settings ====================
+# ==================== Email Settings (Resend API) ====================
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.resend.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
+EMAIL_PORT = 443
+EMAIL_USE_SSL = True
+EMAIL_USE_TLS = False
 EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = 'resend'
 EMAIL_HOST_PASSWORD = config('RESEND_API_KEY', default='')
-DEFAULT_FROM_EMAIL = 'SerialCo TV <noreply@serialco.tv>'
+DEFAULT_FROM_EMAIL = 'noreply@serialcotv.com'
 
 # ==================== Chargily Payment Settings ====================
 CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='')
