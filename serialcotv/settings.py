@@ -186,7 +186,7 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = 'b3440f001@smtp-brevo.com'
-EMAIL_HOST_PASSWORD = config('BREVO_API_KEY', default='')
+EMAIL_HOST_PASSWORD = config('BREVO_API_KEY', default='')  # SMTP Key هنا
 DEFAULT_FROM_EMAIL = 'SerialCo TV <ectroshop9@gmail.com>'
 # ==================== Chargily Payment Settings ====================
 CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='')
