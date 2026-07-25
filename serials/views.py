@@ -118,23 +118,32 @@ def async_post_processing(client_email, client_name, package_id, serial_id, cust
             except Customer.DoesNotExist:
                 pass
         
-        if client_email:
+                if client_email:
             try:
                 logger.info(f"📧 [Async] Sending email to {client_email}")
                 
                 if customer_instance:
-                    email_message = f"مرحباً {client_name}\n\nتم تفعيل اشتراكك!\n\nالباقة: {package.name}\nالسيريال: {serial.serial_number}\nالبين: {serial.pin}\nالتوكنز: {package.tokens_limit}\n\nرابط: https://serialcotv.vercel.app/dashboard"
+                    email_html = f"<p>مرحباً {client_name}،</p><p>تم تفعيل اشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>التوكنز: {package.tokens_limit}</p>"
                 else:
-                    email_message = f"مرحباً {client_name}\n\nشكراً لاشتراكك!\n\nالباقة: {package.name}\nالسيريال: {serial.serial_number}\nالبين: {serial.pin}\nالتوكنز: {package.tokens_limit}\n\nسجل من: https://serialcotv.vercel.app/register"
+                    email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>التوكنز: {package.tokens_limit}</p>"
                 
-                sent = send_mail(
-                    'SerialCo TV 🎉',
-                    email_message,
-                    settings.EMAIL_HOST_USER,
-                    [client_email],
-                    fail_silently=False,
+                # Brevo API (HTTP)
+                api_key = settings.EMAIL_HOST_PASSWORD
+                response = requests.post(
+                    "https://api.brevo.com/v3/smtp/email",
+                    headers={
+                        "api-key": api_key,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "sender": {"name": "SerialCo TV", "email": "ectroshop9@gmail.com"},
+                        "to": [{"email": client_email}],
+                        "subject": "تم تفعيل اشتراكك بنجاح 🎉",
+                        "htmlContent": email_html,
+                    },
+                    timeout=10
                 )
-                logger.info(f"📧 [Async] Sent: {sent}")
+                logger.info(f"📧 [Async] Brevo API response: {response.status_code}")
                 
             except Exception as e:
                 logger.error(f"❌ [Async] Email FAILED: {e}")
