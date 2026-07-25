@@ -188,49 +188,27 @@ def async_post_processing(
         
         # إرسال البريد الإلكتروني
         if client_email:
-            try:
-                logger.info(f"📧 [Async] Sending email to {client_email}")
-                
-                if customer_instance:
-                    email_message = (
-                        f"مرحباً {client_name}،\n\n"
-                        f"تم تفعيل اشتراكك بنجاح وربطه بحسابك!\n\n"
-                        f"الباقة: {package.name}\n"
-                        f"السيريال: {serial.serial_number}\n"
-                        f"البين: {serial.pin}\n"
-                        f"عدد التوكنز: {package.tokens_limit}\n\n"
-                        f"رابط Dashboard: https://serialcotv.vercel.app/dashboard\n\n"
-                        f"يمكنك استخدام السيريال مباشرة من حسابك."
-                    )
-                else:
-                    email_message = (
-                        f"مرحباً {client_name}،\n\n"
-                        f"شكراً لاشتراكك! هذه بيانات السيريال الخاص بك:\n\n"
-                        f"الباقة: {package.name}\n"
-                        f"السيريال: {serial.serial_number}\n"
-                        f"البين: {serial.pin}\n"
-                        f"عدد التوكنز: {package.tokens_limit}\n\n"
-                        f"للاستفادة من اشتراكك:\n"
-                        f"1. سجل حساب جديد من هنا: https://serialcotv.vercel.app/register\n"
-                        f"2. فعّل السيريال من Dashboard\n\n"
-                        f"رابط Dashboard: https://serialcotv.vercel.app/dashboard"
-                    )
-                
-                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or settings.EMAIL_HOST_USER
-                logger.info(f"📧 [Async] From: {from_email}")
-                
-                sent = send_mail(
-                    subject='SerialCo TV - تم تفعيل اشتراكك بنجاح 🎉',
-                    message=email_message,
-                    from_email=from_email,
-                    recipient_list=[client_email],
-                    fail_silently=False,
-                )
-                logger.info(f"📧 [Async] Sent count: {sent}")
-                
-            except Exception as e:
-                logger.error(f"❌ [Async] Email sending FAILED: {type(e).__name__}: {e}")
+    try:
+        import resend
+        resend.api_key = settings.EMAIL_HOST_PASSWORD
         
+        logger.info(f"📧 [Async] Sending email to {client_email}")
+        
+        if customer_instance:
+            email_html = f"<p>مرحباً {client_name}،</p><p>تم تفعيل اشتراكك بنجاح وربطه بحسابك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>رابط: https://serialcotv.vercel.app/dashboard</p>"
+        else:
+            email_html = f"<p>مرحباً {client_name}،</p><p>شكراً لاشتراكك!</p><p>الباقة: {package.name}<br>السيريال: {serial.serial_number}<br>البين: {serial.pin}<br>عدد التوكنز: {package.tokens_limit}</p><p>سجل من: https://serialcotv.vercel.app/register</p>"
+        
+        resend.Emails.send({
+            "from": "SerialCo TV <noreply@serialcotv.com>",
+            "to": [client_email],
+            "subject": "تم تفعيل اشتراكك بنجاح 🎉",
+            "html": email_html,
+        })
+        logger.info(f"✅ [Async] Email sent via Resend API")
+        
+    except Exception as e:
+        logger.error(f"❌ [Async] Email FAILED: {e}")        
         # تحديث Google Sheet
         if sheet_url:
             try:
