@@ -117,6 +117,11 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
 }
 
+# ==================== ImageKit Configuration ====================
+IMAGEKIT_PUBLIC_KEY = config('IMAGEKIT_PUBLIC_KEY', default='')
+IMAGEKIT_PRIVATE_KEY = config('IMAGEKIT_PRIVATE_KEY', default='')
+IMAGEKIT_URL_ENDPOINT = config('IMAGEKIT_URL_ENDPOINT', default='')
+
 # ==================== CORS Configuration ====================
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS',
