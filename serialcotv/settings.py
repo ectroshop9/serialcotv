@@ -1,4 +1,3 @@
-
 import os
 from pathlib import Path
 from datetime import timedelta
@@ -11,12 +10,12 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-now')
 DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', 
-    default='.onrender.com,localhost,127.0.0.1,.serialco.tv,www.serialco.tv,.cloudshell.dev',
+    default='.onrender.com,localhost,127.0.0.1,.serialco.tv,www.serialco.tv,.cloudshell.dev,.vercel.app',
     cast=Csv()
 )
 
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS',
-    default='https://*.cloudshell.dev,https://*.serialco.tv,https://*.onrender.com',
+    default='https://*.cloudshell.dev,https://*.serialco.tv,https://*.onrender.com,https://*.vercel.app',
     cast=Csv()
 )
 
@@ -26,15 +25,12 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-
     'cloudinary_storage',  
     'whitenoise.runserver_nostatic',
     'django.contrib.staticfiles',
     'cloudinary',  
-
     'rest_framework',
     'corsheaders',
-
     'accounts',
     'content',
     'serials',
@@ -73,7 +69,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'serialcotv.wsgi.application'
 
-# ==================== Database Configuration ====================
 DATABASES = {
     'default': dj_database_url.config(
         default=config('DATABASE_URL', default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
@@ -95,20 +90,14 @@ USE_I18N = True
 USE_L10N = True
 USE_TZ = True
 
-# ==================== Static & Media Files ====================
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 STORAGES = {
-    "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-    },
+    "default": {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 
 CLOUDINARY_STORAGE = {
@@ -117,45 +106,21 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
 }
 
-# ==================== ImageKit Configuration ====================
 IMAGEKIT_PUBLIC_KEY = config('IMAGEKIT_PUBLIC_KEY', default='')
 IMAGEKIT_PRIVATE_KEY = config('IMAGEKIT_PRIVATE_KEY', default='')
 IMAGEKIT_URL_ENDPOINT = config('IMAGEKIT_URL_ENDPOINT', default='')
 
-# ==================== CORS Configuration ====================
-CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS',
-    default='https://serialco.tv,https://www.serialco.tv,http://localhost:3000,http://127.0.0.1:3000',
-    cast=Csv()
-)
-
-if DEBUG:
-    CORS_ALLOWED_ORIGINS.extend([
-        "https://*.onrender.com",
-        "https://*.cloudshell.dev",
-    ])
-
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_HEADERS = [
-    'authorization',
-    'content-type',
-    'x-requested-with',
-    'accept',
-    'origin',
-    'x-csrftoken',
-    'user-agent',
-    'x-real-ip',
-    'x-forwarded-for',
-]
+CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'x-requested-with', 'accept', 'origin', 'x-csrftoken']
 
-# ==================== REST Framework ====================
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'accounts.authentication.CustomerJWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+        'rest_framework.permissions.AllowAny',
     ],
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
@@ -167,7 +132,6 @@ REST_FRAMEWORK = {
     }
 }
 
-# ==================== Security Settings ====================
 JWT_SECRET_KEY = config('JWT_SECRET_KEY', default=SECRET_KEY)
 JWT_ALGORITHM = 'HS256'
 WALLET_CHARGE_SECRET = config('WALLET_CHARGE_SECRET', default='wallet-secret-key-123')
@@ -176,61 +140,32 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    X_FRAME_OPTIONS = 'DENY'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# ==================== Email Settings ====================
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp-relay.brevo.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = 'b3440f001@smtp-brevo.com'
-EMAIL_HOST_PASSWORD = config('BREVO_API_KEY', default='')  # SMTP Key هنا
+EMAIL_HOST_PASSWORD = config('BREVO_API_KEY', default='')
 DEFAULT_FROM_EMAIL = 'SerialCo TV <ectroshop9@gmail.com>'
-# ==================== Chargily Payment Settings ====================
+
 CHARGILY_SECRET_KEY = config('CHARGILY_SECRET_KEY', default='')
 CHARGILY_PUBLIC_KEY = config('CHARGILY_PUBLIC_KEY', default='')
 CHARGILY_APP_SECRET = config('CHARGILY_APP_SECRET', default='')
 
-# ==================== Google Sheet Integration ====================
 GOOGLE_SHEET_URL = config('GOOGLE_SHEET_URL', default='')
 
-# ==================== Logging Configuration ====================
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '[{levelname}] {asctime} {module} {message}',
-            'style': '{',
-        },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
-    },
+    'formatters': {'verbose': {'format': '[{levelname}] {asctime} {module} {message}', 'style': '{'}},
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'}},
+    'root': {'handlers': ['console'], 'level': 'INFO'},
     'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'serials': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
+        'django': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'serials': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
     },
 }
