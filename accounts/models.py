@@ -22,35 +22,13 @@ class Source(models.Model):
 
 class Customer(models.Model):
     name = models.CharField(max_length=100)
-    email = models.EmailField(
-        unique=True,
-        null=True,
-        blank=True,
-        verbose_name="البريد الإلكتروني"
-    )
+    email = models.EmailField(unique=True, null=True, blank=True, verbose_name="البريد الإلكتروني")
     phone = models.CharField(max_length=15, unique=True)
+    password_hash = models.CharField(max_length=128, null=True, blank=True, verbose_name="كلمة المرور")
+    token_balance = models.PositiveIntegerField(default=0, null=False, blank=False, verbose_name="رصيد التوكنز")
     
-    # ✅ تحسين: إضافة default=0 وعدم السماح بـ NULL
-    token_balance = models.PositiveIntegerField(
-        default=0,
-        null=False,
-        blank=False,
-        verbose_name="رصيد التوكنز"
-    )
-    
-    user = models.OneToOneField(
-        User, 
-        on_delete=models.CASCADE, 
-        null=True, 
-        blank=True,
-        related_name='customer'
-    )
-    source = models.ForeignKey(
-        Source, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True
-    )
+    user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True, related_name='customer')
+    source = models.ForeignKey(Source, on_delete=models.SET_NULL, null=True, blank=True)
     
     is_active = models.BooleanField(default=True)
     last_login = models.DateTimeField(null=True, blank=True)
@@ -69,7 +47,6 @@ class Customer(models.Model):
         return f"{self.name} ({self.token_balance} tokens)"
     
     def generate_jwt_token(self):
-        """توليد JWT Token للعميل"""
         payload = {
             'customer_id': self.id,
             'email': self.email,
@@ -80,14 +57,7 @@ class Customer(models.Model):
         return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm='HS256')
     
     def spend_tokens(self, amount):
-        """
-        خصم التوكنز بشكل آمن مع التحقق من الرصيد
-        
-        Returns:
-            bool: True إذا تم الخصم بنجاح
-        """
         if self.token_balance >= amount:
-            # ✅ استخدام update مع F expression للتحديث الآمن
             Customer.objects.filter(pk=self.pk).update(
                 token_balance=Coalesce(models.F('token_balance'), 0) - amount
             )
@@ -96,11 +66,6 @@ class Customer(models.Model):
         return False
     
     def add_tokens(self, amount):
-        """
-        إضافة التوكنز بشكل آمن (مانع للـ race conditions)
-        
-        ✅ استخدام update بدلاً من save() للتحديث الآمن
-        """
         Customer.objects.filter(pk=self.pk).update(
             token_balance=Coalesce(models.F('token_balance'), 0) + amount
         )
@@ -108,40 +73,20 @@ class Customer(models.Model):
     
     @classmethod
     def get_or_create_by_email(cls, email, defaults=None):
-        """
-        البحث عن عميل بالإيميل أو إنشائه إذا لم يكن موجوداً
-        
-        مفيد لربط السيريال تلقائياً
-        """
         if not email:
             return None
-            
         customer = cls.objects.filter(email__iexact=email, is_active=True).first()
-        
         if not customer and defaults:
-            customer = cls.objects.create(
-                email=email,
-                **defaults
-            )
-            
+            customer = cls.objects.create(email=email, **defaults)
         return customer
 
 
 class Transaction(models.Model):
-    customer = models.ForeignKey(
-        Customer, 
-        on_delete=models.CASCADE,
-        related_name='transactions'
-    )
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='transactions')
     transaction_type = models.CharField(max_length=20)
     amount = models.IntegerField()
     description = models.TextField()
-    source = models.ForeignKey(
-        Source, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True
-    )
+    source = models.ForeignKey(Source, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -162,20 +107,10 @@ class Notification(models.Model):
         ('info', 'معلومة'),
     ]
     
-    customer = models.ForeignKey(
-        Customer, 
-        on_delete=models.CASCADE, 
-        null=True, 
-        blank=True,
-        related_name='notifications'
-    )
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     title = models.CharField(max_length=200)
     description = models.TextField()
-    notification_type = models.CharField(
-        max_length=20, 
-        choices=NOTIFICATION_TYPES, 
-        default='info'
-    )
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES, default='info')
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     
