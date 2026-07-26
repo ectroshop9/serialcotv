@@ -1,4 +1,4 @@
-from django.urls import path
+ffrom django.urls import path
 from . import views
 
 urlpatterns = [
@@ -10,4 +10,5 @@ urlpatterns = [
     path('validate-token/', views.ValidateTokenAPI.as_view(), name='api_validate_token'),
     path('notifications/', views.NotificationListAPI.as_view(), name='api_notifications'),
     path('notifications/<int:notification_id>/read/', views.MarkNotificationReadAPI.as_view(), name='api_mark_notification_read'),
+    path('link-serial/', views.LinkSerialAPI.as_view(), name='api_link_serial'),
 ]

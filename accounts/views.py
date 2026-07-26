@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timedelta
 from django.conf import settings
 from .models import Customer, Transaction, Source, Notification
+from serials.models import SerialKey
 
 
 class CustomerJWTAuthentication:
@@ -62,21 +63,18 @@ class RegisterAPI(APIView):
         email = request.data.get('email', '').strip().lower()
         password = request.data.get('password', '')
         
-        # التحقق من الاسم
         if not name:
             return Response({
                 'success': False,
                 'message': 'الاسم مطلوب'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # يجب توفير الهاتف أو الإيميل
         if not phone and not email:
             return Response({
                 'success': False,
                 'message': 'رقم الهاتف أو البريد الإلكتروني مطلوب'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # التحقق من صيغة الإيميل
         if email:
             if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
                 return Response({
@@ -90,7 +88,6 @@ class RegisterAPI(APIView):
                     'message': 'البريد الإلكتروني مسجل مسبقاً'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # التحقق من رقم الهاتف
         if phone:
             if Customer.objects.filter(phone=phone).exists():
                 return Response({
@@ -98,7 +95,6 @@ class RegisterAPI(APIView):
                     'message': 'رقم الهاتف مسجل مسبقاً'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # التحقق من كلمة المرور
         if password:
             if len(password) < 6:
                 return Response({
@@ -106,7 +102,6 @@ class RegisterAPI(APIView):
                     'message': 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # إنشاء العميل
         customer_data = {
             'name': name,
             'phone': phone if phone else '',
@@ -133,7 +128,7 @@ class RegisterAPI(APIView):
             'message': 'تم إنشاء الحساب بنجاح',
             'access_token': jwt_token,
             'token_type': 'bearer',
-            'expires_in': 2592000,  # 30 يوم
+            'expires_in': 2592000,
             'customer': {
                 'id': customer.id,
                 'name': customer.name,
@@ -148,13 +143,12 @@ class RegisterAPI(APIView):
 
 
 class CustomerLoginAPI(APIView):
-    """تسجيل الدخول - يدعم الإيميل+باسورد أو رقم الهاتف فقط"""
+    """تسجيل الدخول"""
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
         password = request.data.get('password', '')
         phone = request.data.get('phone', '').strip()
         
-        # تسجيل الدخول بالإيميل والباسورد
         if email and password:
             try:
                 customer = Customer.objects.get(email=email, is_active=True)
@@ -162,7 +156,7 @@ class CustomerLoginAPI(APIView):
                 if not customer.password_hash:
                     return Response({
                         'success': False,
-                        'message': 'هذا الحساب لا يملك كلمة مرور. استخدم رقم الهاتف لتسجيل الدخول'
+                        'message': 'هذا الحساب لا يملك كلمة مرور'
                     }, status=status.HTTP_401_UNAUTHORIZED)
                 
                 if check_password(password, customer.password_hash):
@@ -196,7 +190,6 @@ class CustomerLoginAPI(APIView):
                     'message': 'البريد الإلكتروني غير مسجل'
                 }, status=status.HTTP_401_UNAUTHORIZED)
         
-        # تسجيل الدخول برقم الهاتف فقط (للعملاء القدامى أو المسجلين بدون إيميل)
         if phone:
             try:
                 customer = Customer.objects.get(phone=phone, is_active=True)
@@ -287,7 +280,7 @@ class ValidateTokenAPI(APIView):
             return Response({
                 'success': False,
                 'valid': False,
-                'message': 'توكن غير صالح - صيغة خاطئة'
+                'message': 'توكن غير صالح'
             }, status=status.HTTP_401_UNAUTHORIZED)
         
         token = auth_header[7:]
@@ -300,14 +293,6 @@ class ValidateTokenAPI(APIView):
             )
             
             customer_id = payload.get('customer_id')
-            token_type = payload.get('type')
-            
-            if token_type != 'customer':
-                return Response({
-                    'success': False,
-                    'valid': False,
-                    'message': 'نوع التوكن غير صالح'
-                }, status=status.HTTP_401_UNAUTHORIZED)
             
             customer = Customer.objects.get(id=customer_id, is_active=True)
             
@@ -325,17 +310,11 @@ class ValidateTokenAPI(APIView):
                 'valid': False,
                 'message': 'انتهت صلاحية التوكن'
             }, status=status.HTTP_401_UNAUTHORIZED)
-        except jwt.InvalidTokenError:
+        except:
             return Response({
                 'success': False,
                 'valid': False,
                 'message': 'توكن غير صالح'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-        except Customer.DoesNotExist:
-            return Response({
-                'success': False,
-                'valid': False,
-                'message': 'العميل غير موجود'
             }, status=status.HTTP_401_UNAUTHORIZED)
 
 
@@ -362,18 +341,11 @@ class UpdateProfileAPI(APIView, JWTAuthMixin):
             updated = True
         
         if email and email != customer.email:
-            if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
-                return Response({
-                    'success': False,
-                    'message': 'صيغة البريد الإلكتروني غير صحيحة'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
             if Customer.objects.filter(email=email).exclude(id=customer.id).exists():
                 return Response({
                     'success': False,
                     'message': 'البريد الإلكتروني مستخدم من قبل'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
             customer.email = email
             updated = True
         
@@ -383,7 +355,6 @@ class UpdateProfileAPI(APIView, JWTAuthMixin):
                     'success': False,
                     'message': 'رقم الهاتف مستخدم من قبل'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
             customer.phone = phone
             updated = True
         
@@ -393,7 +364,6 @@ class UpdateProfileAPI(APIView, JWTAuthMixin):
                     'success': False,
                     'message': 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
             customer.password_hash = make_password(password)
             updated = True
         
@@ -427,7 +397,6 @@ class NotificationListAPI(APIView, JWTAuthMixin):
                 'message': 'المصادقة مطلوبة'
             }, status=status.HTTP_401_UNAUTHORIZED)
         
-        # إشعارات العميل الخاصة + الإشعارات العامة
         notifications = Notification.objects.filter(
             Q(customer=customer) | Q(customer__isnull=True)
         ).order_by('-created_at')[:20]
@@ -475,4 +444,50 @@ class MarkNotificationReadAPI(APIView, JWTAuthMixin):
             return Response({
                 'success': False,
                 'message': 'الإشعار غير موجود'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
+class LinkSerialAPI(APIView, JWTAuthMixin):
+    """ربط السيريال بحساب العميل"""
+    def post(self, request):
+        customer = self.get_customer(request)
+        if not customer:
+            return Response({
+                'success': False,
+                'message': 'المصادقة مطلوبة'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        serial_number = request.data.get('serial_number')
+        pin = request.data.get('pin')
+        
+        if not serial_number or not pin:
+            return Response({
+                'success': False,
+                'message': 'يرجى إدخال السيريال والبين'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            serial_key = SerialKey.objects.get(
+                serial_number=serial_number,
+                pin=pin,
+                customer__isnull=True
+            )
+            
+            serial_key.customer = customer
+            serial_key.used_at = timezone.now()
+            serial_key.save()
+            
+            customer.token_balance += serial_key.tokens_remaining
+            customer.save()
+            
+            return Response({
+                'success': True,
+                'message': 'تم ربط السيريال بنجاح',
+                'tokens_added': serial_key.tokens_remaining,
+                'total_balance': customer.token_balance,
+            })
+        except SerialKey.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'السيريال غير صحيح أو مفعل مسبقاً'
             }, status=status.HTTP_404_NOT_FOUND)
