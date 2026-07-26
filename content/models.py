@@ -24,7 +24,7 @@ class TVBrand(models.Model):
 class Firmware(models.Model):
     brand = models.ForeignKey(TVBrand, on_delete=models.CASCADE)
     model_number = models.CharField(max_length=100)
-    version = models.CharField(max_length=50)
+    version = models.CharField(max_length=50, null=True, blank=True)
     file = models.FileField(upload_to='firmware/', null=True, blank=True)
     file_url = models.URLField(max_length=500, null=True, blank=True)
     cloud_url = models.URLField(max_length=500, null=True, blank=True)
