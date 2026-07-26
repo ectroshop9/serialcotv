@@ -25,6 +25,7 @@ class Firmware(models.Model):
     brand = models.ForeignKey(TVBrand, on_delete=models.CASCADE)
     model_number = models.CharField(max_length=100)
     version = models.CharField(max_length=50, null=True, blank=True)
+    image = models.ImageField(upload_to='firmware_images/', null=True, blank=True)
     file = models.FileField(upload_to='firmware/', null=True, blank=True)
     file_url = models.URLField(max_length=500, null=True, blank=True)
     cloud_url = models.URLField(max_length=500, null=True, blank=True)
@@ -40,7 +41,7 @@ class Firmware(models.Model):
         verbose_name_plural = "Firmwares"
     
     def __str__(self):
-        return f"{self.brand.name} - {self.model_number} - v{self.version}"
+        return f"{self.brand.name} - {self.model_number}"
 
 
 class Schematic(models.Model):
@@ -55,6 +56,7 @@ class Schematic(models.Model):
     model_number = models.CharField(max_length=100)
     schematic_type = models.CharField(max_length=20, choices=SCHEMATIC_TYPES)
     title = models.CharField(max_length=200)
+    image = models.ImageField(upload_to='schematic_images/', null=True, blank=True)
     file = models.FileField(upload_to='schematics/', null=True, blank=True)
     file_url = models.URLField(max_length=500, null=True, blank=True)
     cloud_url = models.URLField(max_length=500, null=True, blank=True)
@@ -100,7 +102,6 @@ class DownloadToken(models.Model):
         return f"{self.file_name} - {'Used' if self.used else 'Valid'}"
 
 
-# ==================== Signals ====================
 @receiver(post_save, sender=Firmware)
 def notify_new_firmware(sender, instance, created, **kwargs):
     if created:
