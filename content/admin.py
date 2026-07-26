@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TVBrand, TVModel, Firmware, Schematic, DownloadToken  # ← أضف DownloadToken
+from .models import TVBrand, Firmware, Schematic, DownloadToken
 
 @admin.register(TVBrand)
 class TVBrandAdmin(admin.ModelAdmin):
@@ -7,23 +7,17 @@ class TVBrandAdmin(admin.ModelAdmin):
     list_filter = ('is_active',)
     search_fields = ('name',)
 
-@admin.register(TVModel)
-class TVModelAdmin(admin.ModelAdmin):
-    list_display = ('brand', 'model_number', 'chassis', 'screen_size', 'is_active')
-    list_filter = ('brand', 'is_active')
-    search_fields = ('model_number', 'chassis', 'brand__name')
-
 @admin.register(Firmware)
 class FirmwareAdmin(admin.ModelAdmin):
-    list_display = ('model', 'version', 'token_cost', 'downloads_count', 'is_active')
-    list_filter = ('is_active', 'model__brand')
-    search_fields = ('model__model_number', 'model__brand__name', 'version')
+    list_display = ('brand', 'model_number', 'version', 'token_cost', 'downloads_count', 'is_active')
+    list_filter = ('is_active', 'brand')
+    search_fields = ('model_number', 'brand__name', 'version')
 
 @admin.register(Schematic)
 class SchematicAdmin(admin.ModelAdmin):
-    list_display = ('model', 'title', 'schematic_type', 'token_cost', 'downloads_count', 'is_active')
-    list_filter = ('schematic_type', 'is_active', 'model__brand')
-    search_fields = ('title', 'model__model_number', 'model__brand__name')
+    list_display = ('brand', 'model_number', 'title', 'schematic_type', 'token_cost', 'downloads_count', 'is_active')
+    list_filter = ('schematic_type', 'is_active', 'brand')
+    search_fields = ('title', 'model_number', 'brand__name')
 
 @admin.register(DownloadToken)
 class DownloadTokenAdmin(admin.ModelAdmin):
